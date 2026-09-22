@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '4.1.2';
+const APP_VERSION = '4.1.3';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -58,6 +58,14 @@ const defaultRooms = [
   { id: 'bath1', name: 'Baño 1', order: 9 },
   { id: 'master', name: 'Dormitorio principal', order: 10 },
 ];
+
+function normalizeRooms(items = []) {
+  const byId = new Map((Array.isArray(items) ? items : []).filter(item => item && item.id).map(item => [item.id, item]));
+  return defaultRooms.map(def => {
+    const existing = byId.get(def.id);
+    return existing ? { ...def, ...existing, id: def.id, order: def.order } : { ...def };
+  });
+}
 
 const floorLayout = [
   { id: 'entry', type: 'rect', x: 35, y: 40, w: 175, h: 170, labelX: 122, labelY: 116, bubbleX: 122, bubbleY: 158, base: 'room-base-a' },
@@ -346,6 +354,16 @@ async function loadState() {
   [state.rooms, state.users, state.tasks, state.history, state.settings, state.templates] = await Promise.all([
     getAll('rooms'), getAll('users'), getAll('tasks'), getAll('history'), getAll('settings'), getAll('templates')
   ]);
+
+  // Las estancias forman parte de la estructura fija de la vivienda. Si una
+  // sincronización antigua/incompleta deja el store vacío o sin alguna estancia,
+  // lo autorreparamos sin perder nombres personalizados existentes.
+  const normalizedRooms = normalizeRooms(state.rooms);
+  const roomStructureNeedsRepair = state.rooms.length !== normalizedRooms.length ||
+    normalizedRooms.some(room => !state.rooms.some(existing => existing.id === room.id));
+  state.rooms = normalizedRooms;
+  if (roomStructureNeedsRepair) await putMany('rooms', normalizedRooms);
+
   state.rooms.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
   state.users.sort((a, b) => a.name.localeCompare(b.name, 'es'));
   state.tasks = state.tasks.map(task => ({ recurrence: 'none', recurrenceDays: null, ...task }));
@@ -442,7 +460,7 @@ function renderFilters() {
   const selectedRoutineAssignee = els.routineAssignee.value;
   const selectedPlanAssignee = els.planAssigneeFilter.value || 'all';
 
-  const roomOptions = optionMarkup(state.rooms, room => room.id, room => room.name);
+  const roomOptions = optionMarkup(normalizeRooms(state.rooms), room => room.id, room => room.name);
   const userOptions = optionMarkup(state.users, user => user.id, user => user.name);
 
   els.roomFilter.innerHTML = `<option value="all">Todas</option>${roomOptions}`;
@@ -1222,6 +1240,7 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
       const deletedAt = deleted.get(`${store}:${item.id}`) || 0;
       return itemTimestamp(item) > deletedAt;
     });
+    if (store === 'rooms') data[store] = normalizeRooms(data[store]);
   }
 
   const localHouse = local.data.houseName || { id: 'houseName', value: 'Mi casa', modifiedAt: 0 };
@@ -1247,7 +1266,13 @@ async function applySnapshot(snapshot, { replace = true } = {}) {
     for (const store of SYNCABLE_STORES) await clearStore(store);
     await clearStore('sync');
   }
-  for (const store of SYNCABLE_STORES) if (snap.data[store].length) await putMany(store, snap.data[store]);
+  for (const store of SYNCABLE_STORES) {
+    if (store === 'rooms') {
+      await putMany('rooms', normalizeRooms(snap.data.rooms));
+      continue;
+    }
+    if (snap.data[store].length) await putMany(store, snap.data[store]);
+  }
   if (snap.tombstones.length) await putMany('sync', snap.tombstones);
   const currentSettings = await getAll('settings');
   const houseName = snap.data.houseName || { id: 'houseName', value: 'Mi casa', modifiedAt: 0 };
