@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '4.2.1';
+const APP_VERSION = '4.2.2';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -12,6 +12,7 @@ const LS_CLOUD_DIRTY = 'hometasks-sync-dirty';
 const LS_DEVICE_ID = 'hometasks-device-id';
 const LS_LAST_SYNC_ATTEMPT = 'hometasks-sync-last-attempt';
 const LS_LAST_SYNC_RESULT = 'hometasks-sync-last-result';
+const LS_LOCAL_REVISION = 'hometasks-local-revision';
 
 
 const makeId = () => (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
@@ -1174,12 +1175,34 @@ async function markDeleted(store, entityId, deletedAt = Date.now()) {
   });
 }
 
+function getLocalRevision() {
+  return Number(localStorage.getItem(LS_LOCAL_REVISION) || 0);
+}
+
+function bumpLocalRevision() {
+  const current = getLocalRevision();
+  const next = Math.max(Date.now(), current + 1);
+  localStorage.setItem(LS_LOCAL_REVISION, String(next));
+  return next;
+}
+
+function scheduleSyncSoon(delay = 1400) {
+  if (state.syncTimer) clearTimeout(state.syncTimer);
+  if (!els.autoSyncToggle?.checked || !syncConfigured() || !syncLinked() || !navigator.onLine) return;
+  state.syncTimer = setTimeout(() => {
+    state.syncTimer = null;
+    if (state.syncBusy) {
+      scheduleSyncSoon(1200);
+      return;
+    }
+    syncNow({ silent: true });
+  }, delay);
+}
+
 function touchCloudDirty() {
   localStorage.setItem(LS_CLOUD_DIRTY, '1');
-  if (state.syncTimer) clearTimeout(state.syncTimer);
-  if (els.autoSyncToggle?.checked && syncConfigured() && syncLinked() && navigator.onLine) {
-    state.syncTimer = setTimeout(() => syncNow({ silent: true }), 4500);
-  }
+  bumpLocalRevision();
+  scheduleSyncSoon(2200);
   renderSyncPanel();
 }
 
@@ -1233,6 +1256,34 @@ function mergeTombstones(localItems = [], remoteItems = []) {
   return [...map.values()];
 }
 
+function reconcileTaskCompletionFromHistory(data) {
+  const completedByTask = new Map();
+  for (const entry of data.history || []) {
+    if (!entry?.taskId || entry.recurring) continue;
+    const previous = completedByTask.get(entry.taskId);
+    if (!previous || Number(entry.completedAt || 0) > Number(previous.completedAt || 0)) {
+      completedByTask.set(entry.taskId, entry);
+    }
+  }
+
+  data.tasks = (data.tasks || []).map(task => {
+    // Recurring tasks intentionally become pending again after each completion.
+    if (task.recurrence && task.recurrence !== 'none') return task;
+    const completion = completedByTask.get(task.id);
+    if (!completion) return task;
+    const completedAt = Number(completion.completedAt || completion.modifiedAt || 0);
+    if (!completedAt) return task;
+    if (task.completed && Number(task.completedAt || 0) >= completedAt) return task;
+    return {
+      ...task,
+      completed: true,
+      completedAt,
+      modifiedAt: Math.max(itemTimestamp(task), itemTimestamp(completion), completedAt),
+    };
+  });
+  return data;
+}
+
 function mergeSnapshots(localSnapshot, remoteSnapshot) {
   const local = validateSnapshot(structuredClone(localSnapshot));
   const remote = validateSnapshot(structuredClone(remoteSnapshot));
@@ -1265,6 +1316,8 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
   const remoteHouse = remote.data.houseName || { id: 'houseName', value: 'Mi casa', modifiedAt: 0 };
   data.houseName = itemTimestamp(remoteHouse) > itemTimestamp(localHouse) ? remoteHouse : localHouse;
 
+  reconcileTaskCompletionFromHistory(data);
+
   const survivingTombstones = tombstones.filter(tomb => {
     const item = data[tomb.store]?.find(entry => entry.id === tomb.entityId);
     return !item || Number(tomb.deletedAt || 0) >= itemTimestamp(item);
@@ -1280,21 +1333,44 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
 
 async function applySnapshot(snapshot, { replace = true } = {}) {
   const snap = validateSnapshot(structuredClone(snapshot));
+  const tombstoneKeys = new Set(snap.tombstones.map(item => `${item.store}:${item.entityId}`));
+  for (const store of SYNCABLE_STORES) {
+    snap.data[store] = snap.data[store].filter(item => !tombstoneKeys.has(`${store}:${item.id}`));
+  }
+  reconcileTaskCompletionFromHistory(snap.data);
+
   if (replace) {
     for (const store of SYNCABLE_STORES) await clearStore(store);
     await clearStore('sync');
   }
+
   for (const store of SYNCABLE_STORES) {
-    if (store === 'rooms') {
-      await putMany('rooms', normalizeRooms(snap.data.rooms));
-      continue;
+    let incoming = snap.data[store];
+    if (!replace) {
+      const current = await getAll(store);
+      incoming = mergeEntityArrays(current, incoming).filter(item => !tombstoneKeys.has(`${store}:${item.id}`));
+      if (store === 'tasks') {
+        const mergedHistory = mergeEntityArrays(await getAll('history'), snap.data.history || [])
+          .filter(item => !tombstoneKeys.has(`history:${item.id}`));
+        const safeData = { tasks: incoming, history: mergedHistory };
+        reconcileTaskCompletionFromHistory(safeData);
+        incoming = safeData.tasks;
+      }
     }
-    if (snap.data[store].length) await putMany(store, snap.data[store]);
+    if (store === 'rooms') incoming = normalizeRooms(incoming);
+    if (incoming.length) await putMany(store, incoming);
+  }
+
+  // Tombstones are explicit deletions and must be applied even during a non-destructive sync.
+  for (const tomb of snap.tombstones) {
+    if (SYNCABLE_STORES.includes(tomb.store)) await remove(tomb.store, tomb.entityId);
   }
   if (snap.tombstones.length) await putMany('sync', snap.tombstones);
+
   const currentSettings = await getAll('settings');
   const houseName = snap.data.houseName || { id: 'houseName', value: 'Mi casa', modifiedAt: 0 };
-  await put('settings', houseName);
+  const currentHouse = currentSettings.find(item => item.id === 'houseName');
+  if (replace || !currentHouse || itemTimestamp(houseName) >= itemTimestamp(currentHouse)) await put('settings', houseName);
   if (snap.homeId) await put('settings', { id: 'homeId', value: snap.homeId, modifiedAt: snap.updatedAt || Date.now() });
   for (const marker of ['v1-initialized','v1-structure-102','v2-initialized','v3-initialized','v4-initialized','v41-initialized']) {
     if (!currentSettings.some(item => item.id === marker)) await put('settings', { id: marker, value: true });
@@ -1786,9 +1862,15 @@ async function adoptCloudData() {
 
 async function syncNow(options = {}) {
   const silent = options?.silent === true;
-  if (state.syncBusy || !navigator.onLine || !syncConfigured() || !syncLinked()) return;
+  if (!navigator.onLine || !syncConfigured() || !syncLinked()) return;
+  if (state.syncBusy) {
+    if (localStorage.getItem(LS_CLOUD_DIRTY) === '1') scheduleSyncSoon(1200);
+    return;
+  }
+
   const startedAt = Date.now();
   localStorage.setItem(LS_LAST_SYNC_ATTEMPT, String(startedAt));
+  let syncedRevision = getLocalRevision();
   try {
     state.syncBusy = true;
     state.syncError = '';
@@ -1796,8 +1878,8 @@ async function syncNow(options = {}) {
     renderSyncPanel();
 
     const provider = activeSyncProvider();
-    const dirty = localStorage.getItem(LS_CLOUD_DIRTY) === '1';
-    const local = await buildSyncSnapshot();
+    const dirtyAtStart = localStorage.getItem(LS_CLOUD_DIRTY) === '1';
+    let local = await buildSyncSnapshot();
 
     if (!silent) setSyncProgress(18, 'Contactando con Apps Script', 'Solicitando la copia más reciente de la nube.');
     const remote = await provider.pull({
@@ -1808,23 +1890,55 @@ async function syncNow(options = {}) {
 
     if (!silent) setSyncProgress(43, 'Comparando cambios', 'Fusionando los cambios del PC, móvil y nube sin perder datos.');
     let finalSnapshot = remote ? mergeSnapshots(local, remote) : local;
+    let mustPush = dirtyAtStart;
 
-    if (dirty) {
-      if (!silent) setSyncProgress(58, 'Enviando cambios', 'Guardando en la nube los cambios hechos en este dispositivo.');
+    // A local modification may happen while the network request is in flight.
+    // Re-read and merge until the local revision is stable, so a sync can never
+    // overwrite a completion/history entry created during that same sync.
+    for (let pass = 0; pass < 3; pass++) {
+      const currentRevision = getLocalRevision();
+      if (currentRevision !== syncedRevision) {
+        syncedRevision = currentRevision;
+        mustPush = true;
+        if (!silent) setSyncProgress(52 + pass * 6, 'Incorporando cambios recientes', 'Se detectaron cambios locales mientras se sincronizaba. Se incorporan antes de continuar.');
+        local = await buildSyncSnapshot();
+        finalSnapshot = mergeSnapshots(local, finalSnapshot);
+      }
+
+      if (!mustPush) break;
+      if (!silent) setSyncProgress(64 + pass * 5, 'Enviando cambios', 'Guardando en la nube la versión fusionada.');
       const confirmed = await provider.push(finalSnapshot, {
         onRetry: ({ nextAttempt }) => {
-          if (!silent) setSyncProgress(70, 'Esperando a Apps Script', `Google está tardando en responder. Reintento automático ${nextAttempt}.`);
+          if (!silent) setSyncProgress(72, 'Esperando a Apps Script', `Google está tardando en responder. Reintento automático ${nextAttempt}.`);
         }
       });
-      if (!silent) setSyncProgress(80, 'Confirmando la nube', 'Comprobando que Google Drive contiene la versión fusionada.');
       if (confirmed) finalSnapshot = mergeSnapshots(finalSnapshot, confirmed);
-      localStorage.setItem(LS_CLOUD_DIRTY, '0');
-    } else if (!silent) {
-      setSyncProgress(72, 'Nube descargada', 'No había cambios locales que enviar.');
+
+      const afterPushRevision = getLocalRevision();
+      if (afterPushRevision === syncedRevision) {
+        mustPush = false;
+        break;
+      }
+      syncedRevision = afterPushRevision;
+      mustPush = true;
+      local = await buildSyncSnapshot();
+      finalSnapshot = mergeSnapshots(local, finalSnapshot);
     }
 
-    if (!silent) setSyncProgress(88, 'Aplicando cambios', 'Actualizando la base local de HomeTasks.');
-    await applySnapshot(finalSnapshot, { replace: true });
+    // One final local merge protects changes made after the last confirmation.
+    const revisionBeforeApply = getLocalRevision();
+    if (revisionBeforeApply !== syncedRevision) {
+      syncedRevision = revisionBeforeApply;
+      const latestLocal = await buildSyncSnapshot();
+      finalSnapshot = mergeSnapshots(latestLocal, finalSnapshot);
+      mustPush = true;
+    }
+
+    if (!silent) setSyncProgress(88, 'Aplicando cambios', 'Actualizando la base local sin borrar cambios creados durante la sincronización.');
+    await applySnapshot(finalSnapshot, { replace: false });
+
+    const stable = getLocalRevision() === syncedRevision && !mustPush;
+    localStorage.setItem(LS_CLOUD_DIRTY, stable ? '0' : '1');
     const completedAt = Date.now();
     localStorage.setItem(LS_LAST_SYNC, String(completedAt));
     state.syncStatus = {
@@ -1834,17 +1948,22 @@ async function syncNow(options = {}) {
       provider: provider.name,
     };
     await loadState();
-    recordSyncResult(true, dirty ? 'Sincronización completada' : 'Nube actualizada');
-    await loadState();
+    recordSyncResult(true, stable ? 'Sincronización completada' : 'Cambios locales pendientes de confirmación');
     renderAll();
+
+    if (!stable) scheduleSyncSoon(900);
     if (!silent) {
-      finishSyncProgress(true, 'Sincronización completada', `Proceso terminado en ${((Date.now() - startedAt) / 1000).toFixed(1)} s.`);
-      showToast(dirty ? 'Sincronización completada' : 'Datos actualizados desde la nube');
+      finishSyncProgress(true, stable ? 'Sincronización completada' : 'Cambios protegidos', stable
+        ? `Proceso terminado en ${((Date.now() - startedAt) / 1000).toFixed(1)} s.`
+        : 'Se detectó un cambio mientras sincronizabas. HomeTasks lo ha conservado y lo enviará automáticamente.');
+      showToast(stable ? 'Sincronización completada' : 'Cambios guardados · sincronizando de nuevo');
     }
   } catch (error) {
     console.error(error);
+    localStorage.setItem(LS_CLOUD_DIRTY, '1');
     recordSyncResult(false, error.message);
     state.syncError = error.message;
+    scheduleSyncSoon(2500);
     if (!silent) {
       finishSyncProgress(false, 'Error de sincronización', error.message);
       showToast('Sincronización incompleta');
