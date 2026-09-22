@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '5.0.0';
+const APP_VERSION = '5.0.1';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -443,6 +443,7 @@ function openRoomTasks(roomId) {
 }
 
 function renderRoomSummary() {
+  if (!els.roomSummary) return;
   els.roomSummary.innerHTML = state.rooms.map(room => {
     const stats = roomStats(room.id);
     const status = stats.overdue ? 'overdue' : stats.count > 0 ? 'pending' : 'ok';
@@ -516,19 +517,21 @@ function renderSummary() {
   const today = pending.filter(task => task.dueDate === todayISO());
   const completedToday = state.history.filter(item => localISO(new Date(item.completedAt)) === todayISO());
 
-  els.pendingCount.textContent = pending.length;
-  els.overdueCount.textContent = overdue.length;
-  els.todayCount.textContent = today.length;
-  els.completedTodayCount.textContent = completedToday.length;
+  if (els.pendingCount) els.pendingCount.textContent = pending.length;
+  if (els.overdueCount) els.overdueCount.textContent = overdue.length;
+  if (els.todayCount) els.todayCount.textContent = today.length;
+  if (els.completedTodayCount) els.completedTodayCount.textContent = completedToday.length;
 
-  const next = [...pending].sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999') || a.createdAt - b.createdAt)[0];
-  if (!next) {
-    els.nextTask.className = 'next-task empty-state';
-    els.nextTask.textContent = 'No hay tareas pendientes.';
-  } else {
-    const person = userName(next.assigneeId, next.assigneeName);
-    els.nextTask.className = 'next-task';
-    els.nextTask.innerHTML = `<strong>${escapeHTML(next.title)}</strong><span>${escapeHTML(roomById(next.roomId)?.name || 'Sin estancia')} · ${escapeHTML(person)} · ${formatDate(next.dueDate)}</span>`;
+  if (els.nextTask) {
+    const next = [...pending].sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999') || a.createdAt - b.createdAt)[0];
+    if (!next) {
+      els.nextTask.className = 'next-task empty-state';
+      els.nextTask.textContent = 'No hay tareas pendientes.';
+    } else {
+      const person = userName(next.assigneeId, next.assigneeName);
+      els.nextTask.className = 'next-task';
+      els.nextTask.innerHTML = `<strong>${escapeHTML(next.title)}</strong><span>${escapeHTML(roomById(next.roomId)?.name || 'Sin estancia')} · ${escapeHTML(person)} · ${formatDate(next.dueDate)}</span>`;
+    }
   }
 }
 

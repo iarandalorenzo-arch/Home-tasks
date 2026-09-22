@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V5.0.0</title>
+  <title>HomeTasks V5.0.1</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,7 +19,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V5.0.0 · uso diario</p>
+          <p class="subtitle">V5.0.1 · hoy + casa</p>
         </div>
       </div>
       <div class="top-actions">
@@ -39,6 +39,22 @@
           </div>
           <button id="todayNewTaskButton" class="primary-button" type="button">+ Nueva tarea</button>
         </div>
+
+        <article class="card floor-card today-floor-card">
+          <div class="card-header">
+            <div>
+              <h3 id="houseNameDisplay">Mi casa</h3>
+              <p>Toca una estancia para abrir sus tareas.</p>
+            </div>
+            <button id="clearRoomFilterButton" class="text-button" type="button" hidden>Ver toda la casa</button>
+          </div>
+          <div id="floorPlan" class="floor-plan" aria-label="Plano interactivo simplificado de la vivienda"></div>
+          <div class="legend">
+            <span><i class="legend-swatch ok"></i>Al día</span>
+            <span><i class="legend-swatch pending"></i>Pendientes</span>
+            <span><i class="legend-swatch overdue"></i>Vencidas</span>
+          </div>
+        </article>
 
         <article class="card today-toolbar">
           <label class="today-person-filter">
@@ -83,68 +99,6 @@
             </div>
             <div id="todayRecentHistory" class="today-history-list"></div>
           </article>
-        </div>
-      </section>
-
-      <section id="view-home" class="view" aria-labelledby="homeTitle">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Resumen de la vivienda</p>
-            <h2 id="homeTitle">Casa</h2>
-          </div>
-          <div class="summary-chips">
-            <span class="chip"><strong id="pendingCount">0</strong> pendientes</span>
-            <span class="chip danger"><strong id="overdueCount">0</strong> vencidas</span>
-          </div>
-        </div>
-
-        <div class="home-layout">
-          <article class="card floor-card">
-            <div class="card-header">
-              <div>
-                <h3 id="houseNameDisplay">Mi casa</h3>
-                <p>Toca una estancia para abrir sus tareas.</p>
-              </div>
-              <button id="clearRoomFilterButton" class="text-button" type="button" hidden>Ver toda la casa</button>
-            </div>
-            <div id="floorPlan" class="floor-plan" aria-label="Plano interactivo simplificado de la vivienda"></div>
-            <div class="legend">
-              <span><i class="legend-swatch ok"></i>Al dia</span>
-              <span><i class="legend-swatch pending"></i>Pendientes</span>
-              <span><i class="legend-swatch overdue"></i>Vencidas</span>
-            </div>
-          </article>
-
-          <aside class="side-stack">
-            <article class="card metric-card">
-              <span class="metric-label">Para hoy</span>
-              <strong id="todayCount" class="metric-number">0</strong>
-              <span class="metric-foot">tareas pendientes hoy</span>
-            </article>
-            <article class="card metric-card">
-              <span class="metric-label">Completadas</span>
-              <strong id="completedTodayCount" class="metric-number">0</strong>
-              <span class="metric-foot">hoy</span>
-            </article>
-            <article class="card next-card">
-              <div class="card-header compact">
-                <div>
-                  <h3>Siguiente</h3>
-                  <p>La tarea pendiente mas proxima.</p>
-                </div>
-              </div>
-              <div id="nextTask" class="next-task empty-state">No hay tareas pendientes.</div>
-            </article>
-            <article class="card room-summary-card">
-              <div class="card-header compact">
-                <div>
-                  <h3>Estancias</h3>
-                  <p>Estado rapido de la casa.</p>
-                </div>
-              </div>
-              <div id="roomSummary" class="room-summary"></div>
-            </article>
-          </aside>
         </div>
       </section>
 
@@ -345,7 +299,7 @@
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Version</span><strong>5.0.0</strong></div>
+            <div class="setting-row"><span>Version</span><strong>5.0.1</strong></div>
           </article>
 
           <article id="syncSettingsCard" class="card settings-card sync-card">
@@ -431,7 +385,7 @@
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">5.0.0</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">5.0.1</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -447,7 +401,6 @@
 
     <nav class="bottom-nav" aria-label="Navegacion principal">
       <button class="nav-item active" data-view="today" type="button"><span>☀</span><small>Hoy</small></button>
-      <button class="nav-item" data-view="home" type="button"><span>⌂</span><small>Casa</small></button>
       <button class="nav-item" data-view="plan" type="button"><span>▦</span><small>Plan</small></button>
       <button class="nav-item" data-view="tasks" type="button"><span>✓</span><small>Tareas</small></button>
       <button class="nav-item" data-view="routines" type="button"><span>↻</span><small>Rutinas</small></button>
