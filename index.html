@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V4.1.5</title>
+  <title>HomeTasks V4.2.0</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,7 +19,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V4.1.5 · borrado sincronizado robusto</p>
+          <p class="subtitle">V4.2.0 · sincronización robusta</p>
         </div>
       </div>
       <div class="top-actions">
@@ -284,18 +284,18 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V4.1</h3>
+            <h3>Estado de V4.2</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Version</span><strong>4.1.3</strong></div>
+            <div class="setting-row"><span>Version</span><strong>4.2.0</strong></div>
           </article>
 
           <article class="card settings-card sync-card">
             <div class="settings-title-row">
               <div>
                 <h3>Sincronización</h3>
-                <p>Proveedor desacoplado: Google Apps Script transporta los cambios y Google Drive conserva el archivo de la casa. HomeTasks continúa funcionando sin conexión.</p>
+                <p>Proveedor desacoplado: Google Apps Script transporta los cambios y Google Drive conserva el archivo de la casa. V4.2 añade reintentos automáticos, menos llamadas al servidor y diagnóstico de cada sincronización.</p>
               </div>
               <span id="syncStatusPill" class="sync-pill">Sin configurar</span>
             </div>
@@ -317,12 +317,24 @@
             <div id="syncConnectedPanel" class="drive-panel" hidden>
               <div class="setting-row"><span>Nube</span><strong id="syncCloudStatus">—</strong></div>
               <div class="setting-row"><span>Última sincronización</span><strong id="syncLastSync">Nunca</strong></div>
+              <div class="setting-row"><span>Último intento</span><strong id="syncLastAttempt">Nunca</strong></div>
+              <div class="setting-row"><span>Resultado</span><strong id="syncLastResult">—</strong></div>
               <div class="setting-row"><span>Dispositivo</span><strong id="syncDeviceId">—</strong></div>
               <div class="sync-actions cloud-actions">
                 <button id="createCloudButton" class="primary-button" type="button" hidden>Crear nube con estos datos</button>
                 <button id="adoptCloudButton" class="primary-button" type="button" hidden>Usar datos de la nube</button>
                 <button id="syncNowButton" class="primary-button" type="button" hidden>Sincronizar ahora</button>
                 <button id="unlinkCloudButton" class="secondary-button" type="button" hidden>Desvincular este dispositivo</button>
+                <div id="syncProgress" class="sync-progress" hidden role="status" aria-live="polite">
+                  <div class="sync-progress-head">
+                    <strong id="syncProgressLabel">Preparando sincronización…</strong>
+                    <span id="syncProgressPercent">0%</span>
+                  </div>
+                  <div class="sync-progress-track" aria-hidden="true">
+                    <div id="syncProgressBar" class="sync-progress-bar" style="width:0%"></div>
+                  </div>
+                  <p id="syncProgressDetail" class="sync-progress-detail">Preparando datos locales.</p>
+                </div>
               </div>
               <label class="switch-row">
                 <input id="autoSyncToggle" type="checkbox" />
@@ -355,8 +367,8 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V4.1. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V4.1</button>
+            <p>Restablece HomeTasks a los datos iniciales de V4.2. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V4.2</button>
           </article>
 
           <article class="card settings-card">

@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '4.1.5';
+const APP_VERSION = '4.2.0';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -10,6 +10,8 @@ const LS_LAST_SYNC = 'hometasks-sync-last-sync';
 const LS_AUTO_SYNC = 'hometasks-sync-auto';
 const LS_CLOUD_DIRTY = 'hometasks-sync-dirty';
 const LS_DEVICE_ID = 'hometasks-device-id';
+const LS_LAST_SYNC_ATTEMPT = 'hometasks-sync-last-attempt';
+const LS_LAST_SYNC_RESULT = 'hometasks-sync-last-result';
 
 
 const makeId = () => (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
@@ -178,6 +180,9 @@ const state = {
   syncStatus: null,
   syncBusy: false,
   syncTimer: null,
+  syncProgress: { visible: false, active: false, percent: 0, label: '', detail: '', state: 'idle' },
+  syncProgressHideTimer: null,
+  syncError: '',
   installPrompt: null,
 };
 
@@ -194,7 +199,7 @@ function cacheElements() {
     'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','saveTaskButton','closeDialogButton','cancelDialogButton',
     'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
     'resetButton','themeButton','toast','offlineReady','installButton','installHelp',
-    'syncStateSummary','syncStatusPill','syncEndpoint','syncHouseKey','generateSyncKeyButton','saveSyncConfigButton','testSyncButton','syncConnectedPanel','syncCloudStatus','syncLastSync','syncDeviceId','createCloudButton','adoptCloudButton','syncNowButton','unlinkCloudButton','autoSyncToggle','syncHelpText','exportBackupButton','importBackupButton','importBackupFile'
+    'syncStateSummary','syncStatusPill','syncEndpoint','syncHouseKey','generateSyncKeyButton','saveSyncConfigButton','testSyncButton','syncConnectedPanel','syncCloudStatus','syncLastSync','syncLastAttempt','syncLastResult','syncDeviceId','createCloudButton','adoptCloudButton','syncNowButton','unlinkCloudButton','autoSyncToggle','syncHelpText','syncProgress','syncProgressBar','syncProgressLabel','syncProgressPercent','syncProgressDetail','exportBackupButton','importBackupButton','importBackupFile'
   ].forEach(id => { els[id] = document.getElementById(id); });
 }
 
@@ -1333,16 +1338,29 @@ async function importLocalBackup(file) {
   }
 }
 
-function jsonpRequest(endpoint, action, houseKey, timeoutMs = 15000) {
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function syncTransportError(message, code = 'transport_error', retryable = true) {
+  const error = new Error(message);
+  error.code = code;
+  error.retryable = retryable;
+  return error;
+}
+
+function jsonpRequestOnce(endpoint, action, houseKey, timeoutMs = 25000) {
   return new Promise((resolve, reject) => {
     const callback = `__ht_jsonp_${Date.now()}_${Math.random().toString(16).slice(2)}`.replace(/[^A-Za-z0-9_$]/g, '_');
     const url = new URL(endpoint);
     url.searchParams.set('action', action);
     url.searchParams.set('key', houseKey);
     url.searchParams.set('callback', callback);
+    url.searchParams.set('clientVersion', APP_VERSION);
     url.searchParams.set('_', String(Date.now()));
     let timer;
     const script = document.createElement('script');
+    script.referrerPolicy = 'no-referrer';
     const cleanup = () => {
       clearTimeout(timer);
       script.remove();
@@ -1351,32 +1369,74 @@ function jsonpRequest(endpoint, action, houseKey, timeoutMs = 15000) {
     globalThis[callback] = payload => {
       cleanup();
       if (!payload?.ok) {
-        reject(new Error(payload?.message || payload?.error || 'El servidor de sincronización rechazó la petición.'));
+        const code = payload?.error || 'server_rejected';
+        reject(syncTransportError(payload?.message || code, code, false));
         return;
       }
       resolve(payload);
     };
     script.onerror = () => {
       cleanup();
-      reject(new Error('No se ha podido leer la respuesta de Google Apps Script. Revisa la URL y la implementación.'));
+      reject(syncTransportError('No se ha podido cargar la respuesta de Google Apps Script.', 'script_load_error', true));
     };
     timer = setTimeout(() => {
       cleanup();
-      reject(new Error('Tiempo de espera agotado al contactar con Apps Script.'));
+      reject(syncTransportError('Apps Script está tardando más de lo esperado en responder.', 'timeout', true));
     }, timeoutMs);
     script.src = url.toString();
     document.head.appendChild(script);
   });
 }
 
-async function noCorsPost(endpoint, payload) {
-  await fetch(endpoint, {
-    method: 'POST',
-    mode: 'no-cors',
-    cache: 'no-store',
-    redirect: 'follow',
-    body: JSON.stringify(payload),
-  });
+async function jsonpRequest(endpoint, action, houseKey, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts || 3));
+  const baseTimeout = Math.max(10000, Number(options.timeoutMs || 25000));
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await jsonpRequestOnce(endpoint, action, houseKey, baseTimeout + ((attempt - 1) * 10000));
+    } catch (error) {
+      lastError = error;
+      if (error?.retryable === false || attempt >= attempts) break;
+      options.onRetry?.({ attempt, nextAttempt: attempt + 1, error });
+      await sleep(900 * attempt);
+    }
+  }
+  if (lastError?.code === 'timeout') {
+    throw syncTransportError('Google Apps Script no ha respondido tras varios intentos. HomeTasks volverá a intentarlo en la próxima sincronización.', 'timeout', true);
+  }
+  throw lastError || syncTransportError('No se ha podido contactar con Apps Script.');
+}
+
+async function noCorsPost(endpoint, payload, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts || 2));
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000 + ((attempt - 1) * 10000));
+    try {
+      await fetch(endpoint, {
+        method: 'POST',
+        mode: 'no-cors',
+        cache: 'no-store',
+        redirect: 'follow',
+        credentials: 'omit',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      return;
+    } catch (error) {
+      clearTimeout(timer);
+      lastError = error;
+      if (attempt >= attempts) break;
+      options.onRetry?.({ attempt, nextAttempt: attempt + 1, error });
+      await sleep(1000 * attempt);
+    }
+  }
+  if (lastError?.name === 'AbortError') throw syncTransportError('Apps Script no ha confirmado el envío dentro del tiempo esperado.', 'post_timeout', true);
+  throw syncTransportError('No se han podido enviar los cambios a Apps Script.', 'post_error', true);
 }
 
 const syncProviders = {
@@ -1389,35 +1449,55 @@ const syncProviders = {
         houseKey: localStorage.getItem(LS_SYNC_HOUSE_KEY) || '',
       };
     },
-    async status() {
+    async ping(options = {}) {
       const { endpoint, houseKey } = this.config();
       if (!endpoint || !houseKey) throw new Error('Configura primero la URL y la clave de la casa.');
-      const response = await jsonpRequest(endpoint, 'status', houseKey);
+      try {
+        const response = await jsonpRequest(endpoint, 'ping', houseKey, { attempts: 2, timeoutMs: 18000, onRetry: options.onRetry });
+        return {
+          hasCloud: Boolean(response.hasCloud),
+          updatedAt: Number(response.updatedAt || 0),
+          homeId: response.homeId || null,
+          provider: response.provider || this.name,
+          protocolVersion: Number(response.protocolVersion || 2),
+        };
+      } catch (error) {
+        // Compatible with the V4.1.x backend, which did not have a ping action.
+        if (error?.code === 'bad_action') return this.status(options);
+        throw error;
+      }
+    },
+    async status(options = {}) {
+      const { endpoint, houseKey } = this.config();
+      if (!endpoint || !houseKey) throw new Error('Configura primero la URL y la clave de la casa.');
+      const response = await jsonpRequest(endpoint, 'status', houseKey, { attempts: 3, timeoutMs: 22000, onRetry: options.onRetry });
       return {
         hasCloud: Boolean(response.hasCloud),
         updatedAt: Number(response.updatedAt || 0),
         homeId: response.homeId || null,
         provider: response.provider || this.name,
+        protocolVersion: Number(response.protocolVersion || 1),
       };
     },
-    async pull() {
+    async pull(options = {}) {
       const { endpoint, houseKey } = this.config();
       if (!endpoint || !houseKey) throw new Error('Configura primero la URL y la clave de la casa.');
-      const response = await jsonpRequest(endpoint, 'pull', houseKey, 20000);
+      const response = await jsonpRequest(endpoint, 'pull', houseKey, { attempts: 3, timeoutMs: 25000, onRetry: options.onRetry });
       return response.snapshot ? validateSnapshot(response.snapshot) : null;
     },
-    async push(snapshot) {
+    async push(snapshot, options = {}) {
       const { endpoint, houseKey } = this.config();
       if (!endpoint || !houseKey) throw new Error('Configura primero la URL y la clave de la casa.');
       await noCorsPost(endpoint, {
         action: 'push',
         key: houseKey,
         deviceId: getDeviceId(),
+        clientVersion: APP_VERSION,
         snapshot,
-      });
-      // doPost is intentionally no-CORS. A subsequent pull is the acknowledgement.
-      await new Promise(resolve => setTimeout(resolve, 650));
-      return this.pull();
+      }, { attempts: 2, onRetry: options.onRetry });
+      // doPost is no-CORS. Pull back the server copy as the acknowledgement.
+      await sleep(1100);
+      return this.pull(options);
     },
   },
 };
@@ -1434,6 +1514,55 @@ function generateHouseKey() {
   return [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
 }
 
+function recordSyncResult(ok, message) {
+  localStorage.setItem(LS_LAST_SYNC_ATTEMPT, String(Date.now()));
+  localStorage.setItem(LS_LAST_SYNC_RESULT, `${ok ? 'ok' : 'error'}|${String(message || '')}`);
+  state.syncError = ok ? '' : String(message || 'Error de sincronización');
+}
+
+function readSyncResult() {
+  const raw = localStorage.getItem(LS_LAST_SYNC_RESULT) || '';
+  if (!raw) return { ok: null, message: '—' };
+  const split = raw.indexOf('|');
+  const kind = split >= 0 ? raw.slice(0, split) : raw;
+  const message = split >= 0 ? raw.slice(split + 1) : '';
+  return { ok: kind === 'ok', message: message || (kind === 'ok' ? 'Correcto' : 'Error') };
+}
+
+function updateSyncProgressDom() {
+  if (!els.syncProgress) return;
+  const progress = state.syncProgress || {};
+  els.syncProgress.hidden = !progress.visible;
+  els.syncProgress.classList.toggle('success', progress.state === 'success');
+  els.syncProgress.classList.toggle('error', progress.state === 'error');
+  const percent = Math.min(100, Math.max(0, Number(progress.percent || 0)));
+  els.syncProgressBar.style.width = `${percent}%`;
+  els.syncProgressPercent.textContent = `${Math.round(percent)}%`;
+  els.syncProgressLabel.textContent = progress.label || 'Sincronizando…';
+  els.syncProgressDetail.textContent = progress.detail || '';
+}
+
+function setSyncProgress(percent, label, detail = '') {
+  clearTimeout(state.syncProgressHideTimer);
+  state.syncProgress = { visible: true, active: true, percent, label, detail, state: 'running' };
+  updateSyncProgressDom();
+  renderSyncPanel();
+}
+
+function finishSyncProgress(ok, label, detail = '') {
+  clearTimeout(state.syncProgressHideTimer);
+  state.syncProgress = { visible: true, active: false, percent: 100, label, detail, state: ok ? 'success' : 'error' };
+  updateSyncProgressDom();
+  renderSyncPanel();
+  if (ok) {
+    state.syncProgressHideTimer = setTimeout(() => {
+      state.syncProgress.visible = false;
+      updateSyncProgressDom();
+      renderSyncPanel();
+    }, 2600);
+  }
+}
+
 function renderSyncPanel() {
   if (!els.syncEndpoint) return;
   const endpoint = localStorage.getItem(LS_SYNC_ENDPOINT) || '';
@@ -1441,12 +1570,17 @@ function renderSyncPanel() {
   const linked = syncLinked();
   const dirty = localStorage.getItem(LS_CLOUD_DIRTY) === '1';
   const configured = Boolean(endpoint && houseKey);
+  const lastResult = readSyncResult();
 
   if (document.activeElement !== els.syncEndpoint) els.syncEndpoint.value = endpoint;
   if (document.activeElement !== els.syncHouseKey) els.syncHouseKey.value = houseKey;
   els.autoSyncToggle.checked = localStorage.getItem(LS_AUTO_SYNC) === '1';
   els.syncDeviceId.textContent = getDeviceId().replace('device-', '').slice(0, 12);
   els.syncLastSync.textContent = formatSyncTime(localStorage.getItem(LS_LAST_SYNC));
+  els.syncLastAttempt.textContent = formatSyncTime(localStorage.getItem(LS_LAST_SYNC_ATTEMPT));
+  els.syncLastResult.textContent = lastResult.message;
+  els.syncLastResult.classList.toggle('sync-result-ok', lastResult.ok === true);
+  els.syncLastResult.classList.toggle('sync-result-error', lastResult.ok === false);
   els.syncConnectedPanel.hidden = !configured;
   els.createCloudButton.hidden = true;
   els.adoptCloudButton.hidden = true;
@@ -1463,13 +1597,13 @@ function renderSyncPanel() {
     els.syncStateSummary.textContent = linked ? 'Vinculado' : 'Preparado';
     els.syncCloudStatus.textContent = 'Sin comprobar';
     if (linked) els.syncNowButton.hidden = false;
-    els.syncHelpText.textContent = 'Pulsa “Probar conexión” para comprobar Apps Script.';
+    els.syncHelpText.textContent = state.syncError || 'Pulsa “Probar conexión” para comprobar Apps Script.';
   } else if (linked) {
     els.syncStatusPill.textContent = dirty ? 'Cambios locales' : 'Sincronizado';
     els.syncStateSummary.textContent = 'Apps Script';
-    els.syncCloudStatus.textContent = state.syncStatus.hasCloud ? 'Disponible' : 'No creada';
+    els.syncCloudStatus.textContent = state.syncStatus.hasCloud ? `Disponible${state.syncStatus.updatedAt ? ` · ${formatSyncTime(state.syncStatus.updatedAt)}` : ''}` : 'No creada';
     els.syncNowButton.hidden = false;
-    els.syncHelpText.textContent = dirty ? 'Hay cambios locales pendientes de sincronizar.' : 'Este dispositivo está vinculado con la nube de HomeTasks.';
+    els.syncHelpText.textContent = state.syncError || (dirty ? 'Hay cambios locales pendientes de sincronizar.' : 'Este dispositivo está vinculado con la nube de HomeTasks.');
   } else if (state.syncStatus.hasCloud) {
     els.syncStatusPill.textContent = 'Nube encontrada';
     els.syncStateSummary.textContent = 'Nube encontrada';
@@ -1483,6 +1617,16 @@ function renderSyncPanel() {
     els.createCloudButton.hidden = false;
     els.syncHelpText.textContent = 'La conexión funciona. Crea la nube con los datos de este dispositivo.';
   }
+
+  if (state.syncBusy) {
+    els.syncStatusPill.textContent = 'Sincronizando…';
+    els.syncStatusPill.classList.add('busy');
+    els.syncNowButton.hidden = true;
+  } else {
+    els.syncStatusPill.classList.remove('busy');
+  }
+  if (state.syncProgress?.active) els.syncNowButton.hidden = true;
+  updateSyncProgressDom();
   updateConnection();
 }
 
@@ -1500,6 +1644,7 @@ async function saveSyncConfig({ quiet = false } = {}) {
       localStorage.removeItem(LS_CLOUD_LINKED);
       localStorage.removeItem(LS_LAST_SYNC);
       state.syncStatus = null;
+      state.syncError = '';
     }
     renderSyncPanel();
     if (!quiet) showToast('Configuración de sincronización guardada');
@@ -1519,16 +1664,27 @@ async function testSyncConnection() {
   try {
     await saveSyncConfig({ quiet: true });
     els.testSyncButton.disabled = true;
-    state.syncStatus = await activeSyncProvider().status();
+    els.testSyncButton.textContent = 'Comprobando…';
+    const provider = activeSyncProvider();
+    state.syncStatus = await provider.ping({
+      onRetry: ({ nextAttempt }) => { els.testSyncButton.textContent = `Reintentando (${nextAttempt})…`; }
+    });
+    // Old backends may report no metadata on ping; status is still compatible.
+    if (!state.syncStatus || state.syncStatus.protocolVersion >= 2 && state.syncStatus.hasCloud === false) {
+      try { state.syncStatus = await provider.status(); } catch (_) {}
+    }
+    state.syncError = '';
     renderSyncPanel();
     showToast('Conexión con Apps Script correcta');
   } catch (error) {
     console.error(error);
     state.syncStatus = null;
+    state.syncError = error.message;
     renderSyncPanel();
-    alert(`No se ha podido conectar con Apps Script.\n\n${error.message}`);
+    showToast('No se ha podido conectar con Apps Script');
   } finally {
     els.testSyncButton.disabled = false;
+    els.testSyncButton.textContent = 'Probar conexión';
   }
 }
 
@@ -1593,31 +1749,68 @@ async function adoptCloudData() {
 async function syncNow(options = {}) {
   const silent = options?.silent === true;
   if (state.syncBusy || !navigator.onLine || !syncConfigured() || !syncLinked()) return;
+  const startedAt = Date.now();
+  localStorage.setItem(LS_LAST_SYNC_ATTEMPT, String(startedAt));
   try {
     state.syncBusy = true;
-    if (!silent && els.syncNowButton) els.syncNowButton.disabled = true;
+    state.syncError = '';
+    if (!silent) setSyncProgress(6, 'Preparando sincronización', 'Leyendo los datos locales de este dispositivo.');
+    renderSyncPanel();
+
     const provider = activeSyncProvider();
     const dirty = localStorage.getItem(LS_CLOUD_DIRTY) === '1';
-    const [local, remote] = await Promise.all([buildSyncSnapshot(), provider.pull()]);
+    const local = await buildSyncSnapshot();
+
+    if (!silent) setSyncProgress(18, 'Contactando con Apps Script', 'Solicitando la copia más reciente de la nube.');
+    const remote = await provider.pull({
+      onRetry: ({ nextAttempt }) => {
+        if (!silent) setSyncProgress(24, 'Apps Script está tardando', `Reintentando la descarga automáticamente · intento ${nextAttempt} de 3.`);
+      }
+    });
+
+    if (!silent) setSyncProgress(43, 'Comparando cambios', 'Fusionando los cambios del PC, móvil y nube sin perder datos.');
     let finalSnapshot = remote ? mergeSnapshots(local, remote) : local;
 
-    // Only write to Apps Script when this device actually has local changes.
-    // Clean devices still pull and apply remote changes immediately.
     if (dirty) {
-      const confirmed = await provider.push(finalSnapshot);
+      if (!silent) setSyncProgress(58, 'Enviando cambios', 'Guardando en la nube los cambios hechos en este dispositivo.');
+      const confirmed = await provider.push(finalSnapshot, {
+        onRetry: ({ nextAttempt }) => {
+          if (!silent) setSyncProgress(70, 'Esperando a Apps Script', `Google está tardando en responder. Reintento automático ${nextAttempt}.`);
+        }
+      });
+      if (!silent) setSyncProgress(80, 'Confirmando la nube', 'Comprobando que Google Drive contiene la versión fusionada.');
       if (confirmed) finalSnapshot = mergeSnapshots(finalSnapshot, confirmed);
       localStorage.setItem(LS_CLOUD_DIRTY, '0');
+    } else if (!silent) {
+      setSyncProgress(72, 'Nube descargada', 'No había cambios locales que enviar.');
     }
 
+    if (!silent) setSyncProgress(88, 'Aplicando cambios', 'Actualizando la base local de HomeTasks.');
     await applySnapshot(finalSnapshot, { replace: true });
-    localStorage.setItem(LS_LAST_SYNC, String(Date.now()));
-    state.syncStatus = await provider.status();
+    const completedAt = Date.now();
+    localStorage.setItem(LS_LAST_SYNC, String(completedAt));
+    state.syncStatus = {
+      hasCloud: true,
+      updatedAt: Number(finalSnapshot.updatedAt || completedAt),
+      homeId: finalSnapshot.homeId || null,
+      provider: provider.name,
+    };
+    await loadState();
+    recordSyncResult(true, dirty ? 'Sincronización completada' : 'Nube actualizada');
     await loadState();
     renderAll();
-    if (!silent) showToast(dirty ? 'Sincronización completada' : 'Datos actualizados desde la nube');
+    if (!silent) {
+      finishSyncProgress(true, 'Sincronización completada', `Proceso terminado en ${((Date.now() - startedAt) / 1000).toFixed(1)} s.`);
+      showToast(dirty ? 'Sincronización completada' : 'Datos actualizados desde la nube');
+    }
   } catch (error) {
     console.error(error);
-    if (!silent) alert(`No se ha podido sincronizar.\n\n${error.message}`);
+    recordSyncResult(false, error.message);
+    state.syncError = error.message;
+    if (!silent) {
+      finishSyncProgress(false, 'Error de sincronización', error.message);
+      showToast('Sincronización incompleta');
+    }
   } finally {
     state.syncBusy = false;
     if (els.syncNowButton) els.syncNowButton.disabled = false;
@@ -1764,7 +1957,7 @@ function setupEvents() {
   els.importBackupFile.addEventListener('change', () => importLocalBackup(els.importBackupFile.files?.[0]));
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V4.1 en este dispositivo?')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V4.2 en este dispositivo?')) return;
     await resetDatabase();
     await ensureV1Data();
     await ensureV2Data();
@@ -1776,7 +1969,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V4.1 restablecida');
+    showToast('V4.2 restablecida');
   });
 
   window.addEventListener('online', updateConnection);

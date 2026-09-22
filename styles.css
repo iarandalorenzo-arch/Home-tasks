@@ -456,3 +456,30 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
   .sync-actions { display: grid; grid-template-columns: 1fr; }
   .sync-actions .primary-button, .sync-actions .secondary-button { width: 100%; }
 }
+
+
+/* V4.2 - progreso y diagnóstico de sincronización */
+.sync-progress {
+  flex: 1 1 100%;
+  min-width: min(100%, 360px);
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+}
+.sync-progress-head { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:11px; }
+.sync-progress-head strong { color:var(--text); }
+.sync-progress-head span { color:var(--muted); font-weight:850; }
+.sync-progress-track { height:8px; margin-top:9px; overflow:hidden; border-radius:999px; background:var(--surface-2); border:1px solid var(--border); }
+.sync-progress-bar { height:100%; width:0; border-radius:999px; background:var(--accent); transition:width 180ms ease; }
+.sync-progress-detail { margin:8px 0 0; color:var(--muted); font-size:10px; line-height:1.4; }
+.sync-progress.success { border-color:color-mix(in srgb, var(--success) 45%, var(--border)); background:var(--success-soft); }
+.sync-progress.success .sync-progress-bar { background:var(--success); }
+.sync-progress.error { border-color:color-mix(in srgb, var(--danger) 55%, var(--border)); background:var(--danger-soft); }
+.sync-progress.error .sync-progress-bar { background:var(--danger); }
+.sync-result-ok { color:var(--success) !important; }
+.sync-result-error { color:var(--danger) !important; }
+.sync-pill.busy { color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 35%, var(--border)); }
+@media (max-width:700px) {
+  .sync-progress { min-width:0; width:100%; }
+}
