@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '4.2.2';
+const APP_VERSION = '5.0.0';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -174,7 +174,7 @@ const state = {
   history: [],
   settings: [],
   templates: [],
-  view: 'home',
+  view: 'today',
   editingTaskId: null,
   editingRoutineId: null,
   planWeekOffset: 0,
@@ -191,15 +191,16 @@ const els = {};
 
 function cacheElements() {
   [
-    'connectionBadge','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
+    'connectionBadge','syncHeaderBadge','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
     'roomFilter','statusFilter','assigneeFilter','taskSearch','taskList','activeRoomHint','newTaskButton',
+    'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayDashboardPending','todayDashboardOverdue','todayDashboardDone','todayDashboardUnassigned','todayTaskList','todayOverdueList','todayTomorrowList','todayRecentHistory',
     'historyUserFilter','historyRoomFilter','historyList',
     'routineRoomFilter','routineSearch','routineList','newRoutineButton','templateCount','activeRoutineCount',
     'planPrevWeek','planTodayWeek','planNextWeek','planWeekLabel','planAssigneeFilter','weeklyPlanner','planBacklog','workloadSummary',
     'houseNameInput','saveHouseNameButton','addUserForm','newUserName','userList','roomSettingsList','saveRoomNamesButton',
     'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','saveTaskButton','closeDialogButton','cancelDialogButton',
     'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
-    'resetButton','themeButton','toast','offlineReady','installButton','installHelp',
+    'resetButton','themeButton','toast','offlineReady','installButton','installHelp','forceAppUpdateButton','appVersionDisplay','lastForcedUpdate','syncSettingsCard',
     'syncStateSummary','syncStatusPill','syncEndpoint','syncHouseKey','generateSyncKeyButton','saveSyncConfigButton','testSyncButton','syncConnectedPanel','syncCloudStatus','syncLastSync','syncLastAttempt','syncLastResult','syncDeviceId','createCloudButton','adoptCloudButton','syncNowButton','unlinkCloudButton','autoSyncToggle','syncHelpText','syncProgress','syncProgressBar','syncProgressLabel','syncProgressPercent','syncProgressDetail','exportBackupButton','importBackupButton','importBackupFile'
   ].forEach(id => { els[id] = document.getElementById(id); });
 }
@@ -465,6 +466,7 @@ function renderFilters() {
   const selectedRoutineRoom = els.routineRoom.value;
   const selectedRoutineAssignee = els.routineAssignee.value;
   const selectedPlanAssignee = els.planAssigneeFilter.value || 'all';
+  const selectedTodayAssignee = els.todayAssigneeFilter?.value || 'all';
 
   const roomOptions = optionMarkup(normalizeRooms(state.rooms), room => room.id, room => room.name);
   const userOptions = optionMarkup(state.users, user => user.id, user => user.name);
@@ -477,6 +479,7 @@ function renderFilters() {
 
   els.assigneeFilter.innerHTML = `<option value="all">Todos</option><option value="unassigned">Sin asignar</option>${userOptions}`;
   els.planAssigneeFilter.innerHTML = `<option value="all">Todas</option><option value="unassigned">Sin asignar</option>${userOptions}`;
+  if (els.todayAssigneeFilter) els.todayAssigneeFilter.innerHTML = `<option value="all">Toda la casa</option><option value="unassigned">Sin asignar</option>${userOptions}`;
   els.historyUserFilter.innerHTML = `<option value="all">Todas</option><option value="unassigned">Sin asignar</option>${userOptions}`;
   els.taskAssignee.innerHTML = `<option value="">Sin asignar</option>${userOptions}`;
   els.routineAssignee.innerHTML = `<option value="">Sin asignar</option>${userOptions}`;
@@ -491,6 +494,7 @@ function renderFilters() {
   setSelectValueIfPresent(els.routineRoom, selectedRoutineRoom);
   setSelectValueIfPresent(els.routineAssignee, selectedRoutineAssignee);
   setSelectValueIfPresent(els.planAssigneeFilter, selectedPlanAssignee);
+  if (els.todayAssigneeFilter) setSelectValueIfPresent(els.todayAssigneeFilter, selectedTodayAssignee);
 }
 
 function setSelectValueIfPresent(select, value) {
@@ -526,6 +530,77 @@ function renderSummary() {
     els.nextTask.className = 'next-task';
     els.nextTask.innerHTML = `<strong>${escapeHTML(next.title)}</strong><span>${escapeHTML(roomById(next.roomId)?.name || 'Sin estancia')} · ${escapeHTML(person)} · ${formatDate(next.dueDate)}</span>`;
   }
+}
+
+function todayMatchesAssignee(task, selected = els.todayAssigneeFilter?.value || 'all') {
+  if (selected === 'all') return true;
+  if (selected === 'unassigned') return !task.assigneeId;
+  return task.assigneeId === selected;
+}
+
+function todayTaskMarkup(task, { showDate = false } = {}) {
+  const room = roomById(task.roomId)?.name || 'Sin estancia';
+  const person = userName(task.assigneeId, task.assigneeName);
+  const datePart = showDate ? `<span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}</span>` : '';
+  return `<div class="today-task-row ${task.priority === 'high' ? 'high' : ''}" data-task-id="${task.id}">
+    <button class="today-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}">✓</button>
+    <button class="today-task-open" type="button" title="Editar tarea">
+      <strong>${escapeHTML(task.title)}</strong>
+      <span>${escapeHTML(room)} · ${escapeHTML(person)}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}</span>
+    </button>
+    ${datePart}
+  </div>`;
+}
+
+function bindTodayTaskEvents(root) {
+  if (!root) return;
+  root.querySelectorAll('.today-task-row').forEach(row => {
+    const id = row.dataset.taskId;
+    row.querySelector('.today-task-check')?.addEventListener('click', event => {
+      event.stopPropagation();
+      toggleTask(id);
+    });
+    row.querySelector('.today-task-open')?.addEventListener('click', () => openTaskDialog(id));
+  });
+}
+
+function renderToday() {
+  if (!els.todayTaskList) return;
+  const selected = els.todayAssigneeFilter?.value || 'all';
+  const today = todayISO();
+  const tomorrow = addDaysISO(1);
+  const pending = state.tasks.filter(task => !task.completed && todayMatchesAssignee(task, selected));
+  const dueToday = pending.filter(task => task.dueDate === today);
+  const overdue = pending.filter(task => task.dueDate && task.dueDate < today);
+  const tomorrowTasks = pending.filter(task => task.dueDate === tomorrow);
+  const doneToday = state.history.filter(item => localISO(new Date(item.completedAt)) === today && (selected === 'all' || (selected === 'unassigned' ? !item.assigneeId : item.assigneeId === selected)));
+  const unassigned = state.tasks.filter(task => !task.completed && !task.assigneeId && (task.dueDate === today || (task.dueDate && task.dueDate < today))).length;
+
+  els.todayDateLabel.textContent = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+  els.todayDashboardPending.textContent = dueToday.length;
+  els.todayDashboardOverdue.textContent = overdue.length;
+  els.todayDashboardDone.textContent = doneToday.length;
+  els.todayDashboardUnassigned.textContent = unassigned;
+
+  const renderList = (element, tasks, emptyText, options = {}) => {
+    element.innerHTML = tasks.length ? tasks.map(task => todayTaskMarkup(task, options)).join('') : `<div class="today-empty">${emptyText}</div>`;
+    bindTodayTaskEvents(element);
+  };
+
+  renderList(els.todayTaskList, dueToday, 'No hay tareas pendientes para hoy.');
+  renderList(els.todayOverdueList, overdue, 'No hay tareas vencidas.', { showDate: true });
+  renderList(els.todayTomorrowList, tomorrowTasks.slice(0, 6), 'No hay tareas previstas para mañana.');
+
+  const recent = [...state.history]
+    .filter(item => selected === 'all' || (selected === 'unassigned' ? !item.assigneeId : item.assigneeId === selected))
+    .sort((a, b) => b.completedAt - a.completedAt)
+    .slice(0, 6);
+  els.todayRecentHistory.innerHTML = recent.length ? recent.map(item => {
+    const room = roomById(item.roomId)?.name || item.roomName || 'Sin estancia';
+    const person = userName(item.assigneeId, item.assigneeName);
+    const when = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(item.completedAt));
+    return `<div class="today-history-row"><span class="today-history-check">✓</span><span><strong>${escapeHTML(item.title)}</strong><small>${escapeHTML(room)} · ${escapeHTML(person)}</small></span><time>${when}</time></div>`;
+  }).join('') : '<div class="today-empty">Todavía no hay actividad reciente.</div>';
 }
 
 function getFilteredTasks() {
@@ -907,11 +982,14 @@ function renderSettings() {
   els.houseNameInput.value = houseName;
   renderUsers();
   renderRoomSettings();
+  if (els.appVersionDisplay) els.appVersionDisplay.textContent = APP_VERSION;
+  if (els.lastForcedUpdate) els.lastForcedUpdate.textContent = formatSyncTime(localStorage.getItem('hometasks-last-forced-update'));
   renderSyncPanel();
 }
 
 function renderAll() {
   renderFilters();
+  renderToday();
   renderSummary();
   renderFloorPlan();
   renderRoomSummary();
@@ -1145,14 +1223,15 @@ function updateConnection() {
   if (!online) {
     els.connectionBadge.textContent = 'Offline · datos locales';
     els.connectionBadge.classList.add('offline');
-    return;
-  }
-  els.connectionBadge.classList.remove('offline');
-  if (syncConfigured() && syncLinked()) {
-    els.connectionBadge.textContent = 'Nube · vinculada';
   } else {
-    els.connectionBadge.textContent = 'Online · datos locales';
+    els.connectionBadge.classList.remove('offline');
+    if (syncConfigured() && syncLinked()) {
+      els.connectionBadge.textContent = 'Nube · vinculada';
+    } else {
+      els.connectionBadge.textContent = 'Online · datos locales';
+    }
   }
+  renderHeaderSyncStatus();
 }
 
 function getDeviceId() {
@@ -1639,6 +1718,34 @@ function finishSyncProgress(ok, label, detail = '') {
   }
 }
 
+function renderHeaderSyncStatus() {
+  if (!els.syncHeaderBadge) return;
+  const linked = syncLinked();
+  const configured = syncConfigured();
+  const dirty = localStorage.getItem(LS_CLOUD_DIRTY) === '1';
+  els.syncHeaderBadge.className = 'sync-header-badge';
+  if (!navigator.onLine) {
+    els.syncHeaderBadge.textContent = linked ? 'Offline' : 'Local';
+    els.syncHeaderBadge.classList.add('offline');
+  } else if (!configured) {
+    els.syncHeaderBadge.textContent = 'Sin nube';
+  } else if (!linked) {
+    els.syncHeaderBadge.textContent = 'Nube lista';
+  } else if (state.syncBusy) {
+    els.syncHeaderBadge.textContent = '↻ Sync';
+    els.syncHeaderBadge.classList.add('busy');
+  } else if (state.syncError) {
+    els.syncHeaderBadge.textContent = '! Sync';
+    els.syncHeaderBadge.classList.add('error');
+  } else if (dirty) {
+    els.syncHeaderBadge.textContent = '↑ Pendiente';
+    els.syncHeaderBadge.classList.add('pending');
+  } else {
+    els.syncHeaderBadge.textContent = '✓ Sync';
+    els.syncHeaderBadge.classList.add('ok');
+  }
+}
+
 function renderSyncPanel() {
   if (!els.syncEndpoint) return;
   const endpoint = localStorage.getItem(LS_SYNC_ENDPOINT) || '';
@@ -1704,6 +1811,7 @@ function renderSyncPanel() {
   if (state.syncProgress?.active) els.syncNowButton.hidden = true;
   updateSyncProgressDom();
   updateConnection();
+  renderHeaderSyncStatus();
 }
 
 async function saveSyncConfig({ quiet = false } = {}) {
@@ -2008,6 +2116,37 @@ function setupAutoSync() {
   });
 }
 
+async function forceAppUpdate() {
+  if (!confirm('¿Forzar la descarga de la versión publicada más reciente? Tus tareas, URL de Apps Script, clave y preferencias se conservarán.')) return;
+  const button = els.forceAppUpdateButton;
+  const original = button?.textContent || 'Forzar actualización de la aplicación';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Limpiando caché…';
+  }
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(key => key.startsWith('hometasks-')).map(key => caches.delete(key)));
+    }
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map(registration => registration.unregister()));
+    }
+    localStorage.setItem('hometasks-last-forced-update', String(Date.now()));
+    const url = new URL(window.location.href);
+    url.searchParams.set('refresh', String(Date.now()));
+    window.location.replace(url.toString());
+  } catch (error) {
+    console.error(error);
+    if (button) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+    showToast('No se pudo forzar la actualización');
+  }
+}
+
 function setupTheme() {
   const saved = localStorage.getItem('hometasks-theme');
   if (saved) document.documentElement.dataset.theme = saved;
@@ -2069,11 +2208,15 @@ function setupEvents() {
   els.routineRoomFilter.addEventListener('change', renderRoutines);
   els.routineSearch.addEventListener('input', renderRoutines);
   els.planAssigneeFilter.addEventListener('change', renderPlan);
+  els.todayAssigneeFilter?.addEventListener('change', renderToday);
   els.planPrevWeek.addEventListener('click', () => { state.planWeekOffset -= 1; renderPlan(); });
   els.planTodayWeek.addEventListener('click', () => { state.planWeekOffset = 0; renderPlan(); });
   els.planNextWeek.addEventListener('click', () => { state.planWeekOffset += 1; renderPlan(); });
 
   els.newTaskButton.addEventListener('click', () => openTaskDialog());
+  els.todayNewTaskButton?.addEventListener('click', () => openTaskDialog(null, todayISO()));
+  els.todayOpenPlanButton?.addEventListener('click', () => switchView('plan'));
+  els.syncHeaderBadge?.addEventListener('click', () => { switchView('settings'); setTimeout(() => els.syncSettingsCard?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); });
   els.newRoutineButton.addEventListener('click', () => openRoutineDialog());
   els.closeDialogButton.addEventListener('click', () => { state.editingTaskId = null; els.taskDialog.close(); });
   els.cancelDialogButton.addEventListener('click', () => { state.editingTaskId = null; els.taskDialog.close(); });
@@ -2112,9 +2255,10 @@ function setupEvents() {
   els.exportBackupButton.addEventListener('click', exportLocalBackup);
   els.importBackupButton.addEventListener('click', () => els.importBackupFile.click());
   els.importBackupFile.addEventListener('change', () => importLocalBackup(els.importBackupFile.files?.[0]));
+  els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V4.2 en este dispositivo?')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V5 en este dispositivo?')) return;
     await resetDatabase();
     await ensureV1Data();
     await ensureV2Data();
@@ -2126,7 +2270,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V4.2 restablecida');
+    showToast('V5 restablecida');
   });
 
   window.addEventListener('online', updateConnection);

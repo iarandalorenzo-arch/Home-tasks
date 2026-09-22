@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V4.2.2</title>
+  <title>HomeTasks V5.0.0</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,17 +19,74 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V4.2.2 · sincronización robusta</p>
+          <p class="subtitle">V5.0.0 · uso diario</p>
         </div>
       </div>
       <div class="top-actions">
+        <button id="syncHeaderBadge" class="sync-header-badge" type="button" title="Estado de sincronización">Sin nube</button>
         <span id="connectionBadge" class="status-badge" title="Estado de conexion">Local</span>
         <button id="themeButton" class="icon-button" type="button" aria-label="Cambiar tema" title="Cambiar tema">◐</button>
       </div>
     </header>
 
     <main id="mainContent" class="content" tabindex="-1">
-      <section id="view-home" class="view active" aria-labelledby="homeTitle">
+      <section id="view-today" class="view active" aria-labelledby="todayTitle">
+        <div class="section-heading task-heading">
+          <div>
+            <p class="eyebrow">Agenda del día</p>
+            <h2 id="todayTitle">Hoy</h2>
+            <p id="todayDateLabel" class="section-note">—</p>
+          </div>
+          <button id="todayNewTaskButton" class="primary-button" type="button">+ Nueva tarea</button>
+        </div>
+
+        <article class="card today-toolbar">
+          <label class="today-person-filter">
+            <span>Mostrar tareas de</span>
+            <select id="todayAssigneeFilter"><option value="all">Toda la casa</option></select>
+          </label>
+          <button id="todayOpenPlanButton" class="secondary-button" type="button">Ver semana</button>
+        </article>
+
+        <div class="today-stats">
+          <article class="card today-stat"><span>Para hoy</span><strong id="todayDashboardPending">0</strong></article>
+          <article class="card today-stat danger"><span>Vencidas</span><strong id="todayDashboardOverdue">0</strong></article>
+          <article class="card today-stat success"><span>Hechas hoy</span><strong id="todayDashboardDone">0</strong></article>
+          <article class="card today-stat"><span>Sin asignar</span><strong id="todayDashboardUnassigned">0</strong></article>
+        </div>
+
+        <div class="today-main-grid">
+          <article class="card today-panel">
+            <div class="card-header compact">
+              <div><h3>Pendientes de hoy</h3><p>Lo que toca hacer hoy.</p></div>
+            </div>
+            <div id="todayTaskList" class="today-task-list"></div>
+          </article>
+          <article class="card today-panel overdue-panel">
+            <div class="card-header compact">
+              <div><h3>Vencidas</h3><p>Tareas que ya deberían estar hechas.</p></div>
+            </div>
+            <div id="todayOverdueList" class="today-task-list"></div>
+          </article>
+        </div>
+
+        <div class="today-lower-grid">
+          <article class="card today-panel">
+            <div class="card-header compact">
+              <div><h3>Mañana</h3><p>Vista rápida del siguiente día.</p></div>
+            </div>
+            <div id="todayTomorrowList" class="today-task-list compact"></div>
+          </article>
+          <article class="card today-panel">
+            <div class="card-header compact">
+              <div><h3>Actividad reciente</h3><p>Últimas tareas completadas.</p></div>
+            </div>
+            <div id="todayRecentHistory" class="today-history-list"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-home" class="view" aria-labelledby="homeTitle">
         <div class="section-heading">
           <div>
             <p class="eyebrow">Resumen de la vivienda</p>
@@ -255,7 +312,7 @@
               </div>
             </label>
             <div class="setting-row"><span>Estancias</span><strong>10</strong></div>
-            <div class="setting-row"><span>Plano</span><strong>Integrado V4</strong></div>
+            <div class="setting-row"><span>Plano</span><strong>Integrado V5</strong></div>
           </article>
 
           <article class="card settings-card users-card">
@@ -284,18 +341,18 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V4.2</h3>
+            <h3>Estado de V5</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Version</span><strong>4.2.2</strong></div>
+            <div class="setting-row"><span>Version</span><strong>5.0.0</strong></div>
           </article>
 
-          <article class="card settings-card sync-card">
+          <article id="syncSettingsCard" class="card settings-card sync-card">
             <div class="settings-title-row">
               <div>
                 <h3>Sincronización</h3>
-                <p>Proveedor desacoplado: Google Apps Script transporta los cambios y Google Drive conserva el archivo de la casa. V4.2 añade reintentos automáticos, menos llamadas al servidor y diagnóstico de cada sincronización.</p>
+                <p>Proveedor desacoplado: Google Apps Script transporta los cambios y Google Drive conserva el archivo de la casa. La sincronización robusta de V4.2 se mantiene sin cambios en V5.</p>
               </div>
               <span id="syncStatusPill" class="sync-pill">Sin configurar</span>
             </div>
@@ -367,8 +424,16 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V4.2. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V4.2</button>
+            <p>Restablece HomeTasks a los datos iniciales de V5. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V5</button>
+          </article>
+
+          <article class="card settings-card">
+            <h3>Actualización de la app</h3>
+            <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">5.0.0</strong></div>
+            <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
+            <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
 
           <article class="card settings-card">
@@ -381,11 +446,12 @@
     </main>
 
     <nav class="bottom-nav" aria-label="Navegacion principal">
-      <button class="nav-item active" data-view="home" type="button"><span>⌂</span><small>Casa</small></button>
+      <button class="nav-item active" data-view="today" type="button"><span>☀</span><small>Hoy</small></button>
+      <button class="nav-item" data-view="home" type="button"><span>⌂</span><small>Casa</small></button>
       <button class="nav-item" data-view="plan" type="button"><span>▦</span><small>Plan</small></button>
       <button class="nav-item" data-view="tasks" type="button"><span>✓</span><small>Tareas</small></button>
       <button class="nav-item" data-view="routines" type="button"><span>↻</span><small>Rutinas</small></button>
-      <button class="nav-item" data-view="history" type="button"><span>◷</span><small>Historico</small></button>
+      <button class="nav-item" data-view="history" type="button"><span>◷</span><small>Hist.</small></button>
       <button class="nav-item" data-view="settings" type="button"><span>⚙</span><small>Ajustes</small></button>
     </nav>
   </div>
