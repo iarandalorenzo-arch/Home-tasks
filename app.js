@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '6.0.0';
+const APP_VERSION = '6.0.1';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -388,19 +388,38 @@ async function ensureV41Data() {
 
 async function ensureV6Data() {
   const settings = await getAll('settings');
+  const [templates, syncEntries] = await Promise.all([getAll('templates'), getAll('sync')]);
+  const deletedTemplateIds = new Set(
+    syncEntries
+      .filter(item => item?.kind === 'tombstone' && item.store === 'templates')
+      .map(item => item.entityId)
+  );
+
+  // V6.0.1: autorreparar la biblioteca de rutinas si una migracion o snapshot
+  // antiguo dejo el store templates vacio/incompleto. Respetamos los tombstones
+  // para no resucitar rutinas que el usuario haya eliminado explicitamente.
+  const byId = new Map(templates.filter(item => item?.id).map(item => [item.id, item]));
+  const missingDefaults = defaultTemplates.filter(item => !byId.has(item.id) && !deletedTemplateIds.has(item.id));
+  if (missingDefaults.length) {
+    await putMany('templates', missingDefaults.map(item => ({ ...item, modifiedAt: item.modifiedAt || item.createdAt || 1 })));
+    localStorage.setItem(LS_CLOUD_DIRTY, '1');
+    bumpLocalRevision();
+  }
+
+  const refreshedTemplates = missingDefaults.length ? await getAll('templates') : templates;
+  const dishwasher = refreshedTemplates.find(item => item.id === 'tpl-kitchen-dishwasher-start');
+  if (dishwasher && !dishwasher.nextTemplateId && !deletedTemplateIds.has('tpl-kitchen-dishwasher-empty')) {
+    await put('templates', {
+      ...dishwasher,
+      nextTemplateId: 'tpl-kitchen-dishwasher-empty',
+      nextDelayMinutes: 120,
+      modifiedAt: Date.now(),
+    });
+    localStorage.setItem(LS_CLOUD_DIRTY, '1');
+    bumpLocalRevision();
+  }
+
   if (!settings.some(item => item.id === 'v6-initialized' && item.value === true)) {
-    const templates = await getAll('templates');
-    const dishwasher = templates.find(item => item.id === 'tpl-kitchen-dishwasher-start');
-    if (dishwasher && !dishwasher.nextTemplateId) {
-      await put('templates', {
-        ...dishwasher,
-        nextTemplateId: 'tpl-kitchen-dishwasher-empty',
-        nextDelayMinutes: 120,
-        modifiedAt: Date.now(),
-      });
-      localStorage.setItem(LS_CLOUD_DIRTY, '1');
-      bumpLocalRevision();
-    }
     await put('settings', { id: 'v6-initialized', value: true });
   }
   await put('settings', { id: 'appVersion', value: APP_VERSION });
