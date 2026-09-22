@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f6f7f9" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="description" content="HomeTasks - gestor domestico ligero y offline-first" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>HomeTasks V4.1.1</title>
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="brand-row">
+        <div class="app-mark" aria-hidden="true">⌂</div>
+        <div>
+          <h1>HomeTasks</h1>
+          <p class="subtitle">V4.1.1 · sincronización Apps Script</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="connectionBadge" class="status-badge" title="Estado de conexion">Local</span>
+        <button id="themeButton" class="icon-button" type="button" aria-label="Cambiar tema" title="Cambiar tema">◐</button>
+      </div>
+    </header>
+
+    <main id="mainContent" class="content" tabindex="-1">
+      <section id="view-home" class="view active" aria-labelledby="homeTitle">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Resumen de la vivienda</p>
+            <h2 id="homeTitle">Casa</h2>
+          </div>
+          <div class="summary-chips">
+            <span class="chip"><strong id="pendingCount">0</strong> pendientes</span>
+            <span class="chip danger"><strong id="overdueCount">0</strong> vencidas</span>
+          </div>
+        </div>
+
+        <div class="home-layout">
+          <article class="card floor-card">
+            <div class="card-header">
+              <div>
+                <h3 id="houseNameDisplay">Mi casa</h3>
+                <p>Toca una estancia para abrir sus tareas.</p>
+              </div>
+              <button id="clearRoomFilterButton" class="text-button" type="button" hidden>Ver toda la casa</button>
+            </div>
+            <div id="floorPlan" class="floor-plan" aria-label="Plano interactivo simplificado de la vivienda"></div>
+            <div class="legend">
+              <span><i class="legend-swatch ok"></i>Al dia</span>
+              <span><i class="legend-swatch pending"></i>Pendientes</span>
+              <span><i class="legend-swatch overdue"></i>Vencidas</span>
+            </div>
+          </article>
+
+          <aside class="side-stack">
+            <article class="card metric-card">
+              <span class="metric-label">Para hoy</span>
+              <strong id="todayCount" class="metric-number">0</strong>
+              <span class="metric-foot">tareas pendientes hoy</span>
+            </article>
+            <article class="card metric-card">
+              <span class="metric-label">Completadas</span>
+              <strong id="completedTodayCount" class="metric-number">0</strong>
+              <span class="metric-foot">hoy</span>
+            </article>
+            <article class="card next-card">
+              <div class="card-header compact">
+                <div>
+                  <h3>Siguiente</h3>
+                  <p>La tarea pendiente mas proxima.</p>
+                </div>
+              </div>
+              <div id="nextTask" class="next-task empty-state">No hay tareas pendientes.</div>
+            </article>
+            <article class="card room-summary-card">
+              <div class="card-header compact">
+                <div>
+                  <h3>Estancias</h3>
+                  <p>Estado rapido de la casa.</p>
+                </div>
+              </div>
+              <div id="roomSummary" class="room-summary"></div>
+            </article>
+          </aside>
+        </div>
+      </section>
+
+      <section id="view-tasks" class="view" aria-labelledby="tasksTitle">
+        <div class="section-heading task-heading">
+          <div>
+            <p class="eyebrow">Pendientes y actividades</p>
+            <h2 id="tasksTitle">Tareas</h2>
+            <p id="activeRoomHint" class="section-note" hidden></p>
+          </div>
+          <button id="newTaskButton" class="primary-button" type="button">+ Nueva tarea</button>
+        </div>
+
+        <article class="card filter-card">
+          <div class="filters">
+            <label>
+              <span>Estancia</span>
+              <select id="roomFilter"><option value="all">Todas</option></select>
+            </label>
+            <label>
+              <span>Estado</span>
+              <select id="statusFilter">
+                <option value="pending">Pendientes</option>
+                <option value="all">Todas</option>
+                <option value="completed">Completadas</option>
+              </select>
+            </label>
+            <label>
+              <span>Responsable</span>
+              <select id="assigneeFilter"><option value="all">Todos</option></select>
+            </label>
+            <label class="search-field">
+              <span>Buscar</span>
+              <input id="taskSearch" type="search" placeholder="Lavavajillas, cocina..." autocomplete="off" />
+            </label>
+          </div>
+        </article>
+
+        <div id="taskList" class="task-list"></div>
+      </section>
+
+
+      <section id="view-plan" class="view" aria-labelledby="planTitle">
+        <div class="section-heading task-heading">
+          <div>
+            <p class="eyebrow">Agenda doméstica</p>
+            <h2 id="planTitle">Plan semanal</h2>
+            <p class="section-note">Organiza las tareas por día y revisa el reparto entre las personas de la casa.</p>
+          </div>
+          <div class="week-actions">
+            <button id="planPrevWeek" class="secondary-button compact-button" type="button" aria-label="Semana anterior">‹</button>
+            <button id="planTodayWeek" class="secondary-button compact-button" type="button">Hoy</button>
+            <button id="planNextWeek" class="secondary-button compact-button" type="button" aria-label="Semana siguiente">›</button>
+          </div>
+        </div>
+
+        <article class="card planner-toolbar">
+          <div class="planner-toolbar-row">
+            <div>
+              <span class="planner-label">Semana</span>
+              <strong id="planWeekLabel">—</strong>
+            </div>
+            <label class="planner-person-filter">
+              <span>Persona</span>
+              <select id="planAssigneeFilter"><option value="all">Todas</option></select>
+            </label>
+          </div>
+        </article>
+
+        <div id="weeklyPlanner" class="weekly-planner" aria-label="Planificador semanal"></div>
+
+        <div class="planner-lower-grid">
+          <article class="card planner-panel">
+            <div class="card-header compact">
+              <div>
+                <h3>Pendientes fuera de agenda</h3>
+                <p>Vencidas y tareas sin fecha.</p>
+              </div>
+            </div>
+            <div id="planBacklog" class="plan-backlog"></div>
+          </article>
+          <article class="card planner-panel">
+            <div class="card-header compact">
+              <div>
+                <h3>Reparto</h3>
+                <p>Carga pendiente y actividad reciente.</p>
+              </div>
+            </div>
+            <div id="workloadSummary" class="workload-summary"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-routines" class="view" aria-labelledby="routinesTitle">
+        <div class="section-heading task-heading">
+          <div>
+            <p class="eyebrow">Plantillas domesticas</p>
+            <h2 id="routinesTitle">Rutinas</h2>
+            <p class="section-note">Crea tareas en un toque y deja definida su repeticion y responsable habitual.</p>
+          </div>
+          <button id="newRoutineButton" class="primary-button" type="button">+ Nueva rutina</button>
+        </div>
+
+        <div class="routine-stats">
+          <article class="card mini-stat"><span>Plantillas</span><strong id="templateCount">0</strong></article>
+          <article class="card mini-stat"><span>Tareas recurrentes activas</span><strong id="activeRoutineCount">0</strong></article>
+        </div>
+
+        <article class="card filter-card">
+          <div class="filters routine-filters">
+            <label>
+              <span>Estancia</span>
+              <select id="routineRoomFilter"><option value="all">Todas</option></select>
+            </label>
+            <label class="search-field">
+              <span>Buscar</span>
+              <input id="routineSearch" type="search" placeholder="Lavavajillas, sabanas..." autocomplete="off" />
+            </label>
+          </div>
+        </article>
+
+        <div id="routineList" class="routine-list"></div>
+      </section>
+
+      <section id="view-history" class="view" aria-labelledby="historyTitle">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Actividad realizada</p>
+            <h2 id="historyTitle">Historico</h2>
+          </div>
+        </div>
+        <article class="card filter-card history-filter-card">
+          <div class="filters history-filters">
+            <label>
+              <span>Persona</span>
+              <select id="historyUserFilter"><option value="all">Todas</option></select>
+            </label>
+            <label>
+              <span>Estancia</span>
+              <select id="historyRoomFilter"><option value="all">Todas</option></select>
+            </label>
+          </div>
+        </article>
+        <article class="card">
+          <div id="historyList" class="history-list"></div>
+        </article>
+      </section>
+
+      <section id="view-settings" class="view" aria-labelledby="settingsTitle">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Configuracion local</p>
+            <h2 id="settingsTitle">Ajustes</h2>
+          </div>
+        </div>
+
+        <div class="settings-grid">
+          <article class="card settings-card">
+            <h3>Casa</h3>
+            <label>
+              <span>Nombre de la vivienda</span>
+              <div class="inline-form">
+                <input id="houseNameInput" type="text" maxlength="40" placeholder="Mi casa" />
+                <button id="saveHouseNameButton" class="secondary-button" type="button">Guardar</button>
+              </div>
+            </label>
+            <div class="setting-row"><span>Estancias</span><strong>10</strong></div>
+            <div class="setting-row"><span>Plano</span><strong>Integrado V4</strong></div>
+          </article>
+
+          <article class="card settings-card users-card">
+            <div class="settings-title-row">
+              <div>
+                <h3>Personas</h3>
+                <p>Anade los miembros que podran recibir tareas.</p>
+              </div>
+            </div>
+            <form id="addUserForm" class="inline-form user-add-form">
+              <input id="newUserName" type="text" maxlength="32" placeholder="Nombre" required />
+              <button class="primary-button" type="submit">Anadir</button>
+            </form>
+            <div id="userList" class="user-list"></div>
+          </article>
+
+          <article class="card settings-card rooms-card">
+            <div class="settings-title-row">
+              <div>
+                <h3>Nombres de estancias</h3>
+                <p>Puedes corregir los nombres sin modificar la geometria del plano.</p>
+              </div>
+            </div>
+            <div id="roomSettingsList" class="room-settings-list"></div>
+            <button id="saveRoomNamesButton" class="secondary-button" type="button">Guardar nombres</button>
+          </article>
+
+          <article class="card settings-card">
+            <h3>Estado de V4.1</h3>
+            <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
+            <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
+            <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
+            <div class="setting-row"><span>Version</span><strong>4.1.1</strong></div>
+          </article>
+
+          <article class="card settings-card sync-card">
+            <div class="settings-title-row">
+              <div>
+                <h3>Sincronización</h3>
+                <p>Proveedor desacoplado: Google Apps Script transporta los cambios y Google Drive conserva el archivo de la casa. HomeTasks continúa funcionando sin conexión.</p>
+              </div>
+              <span id="syncStatusPill" class="sync-pill">Sin configurar</span>
+            </div>
+
+            <label class="full-setting-field">
+              <span>URL de la aplicación web de Apps Script</span>
+              <input id="syncEndpoint" type="url" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/.../exec" />
+            </label>
+            <label class="full-setting-field">
+              <span>Clave privada de la casa</span>
+              <input id="syncHouseKey" type="password" autocomplete="new-password" placeholder="La misma clave configurada en Code.gs" />
+            </label>
+            <div class="sync-actions">
+              <button id="generateSyncKeyButton" class="secondary-button" type="button">Generar clave</button>
+              <button id="saveSyncConfigButton" class="secondary-button" type="button">Guardar configuración</button>
+              <button id="testSyncButton" class="primary-button" type="button">Probar conexión</button>
+            </div>
+
+            <div id="syncConnectedPanel" class="drive-panel" hidden>
+              <div class="setting-row"><span>Nube</span><strong id="syncCloudStatus">—</strong></div>
+              <div class="setting-row"><span>Última sincronización</span><strong id="syncLastSync">Nunca</strong></div>
+              <div class="setting-row"><span>Dispositivo</span><strong id="syncDeviceId">—</strong></div>
+              <div class="sync-actions cloud-actions">
+                <button id="createCloudButton" class="primary-button" type="button" hidden>Crear nube con estos datos</button>
+                <button id="adoptCloudButton" class="primary-button" type="button" hidden>Usar datos de la nube</button>
+                <button id="syncNowButton" class="primary-button" type="button" hidden>Sincronizar ahora</button>
+                <button id="unlinkCloudButton" class="secondary-button" type="button" hidden>Desvincular este dispositivo</button>
+              </div>
+              <label class="switch-row">
+                <input id="autoSyncToggle" type="checkbox" />
+                <span>Sincronizar automáticamente mientras HomeTasks esté abierto</span>
+              </label>
+              <p id="syncHelpText" class="setting-help">Configura la URL y la clave, y prueba la conexión.</p>
+            </div>
+
+            <details class="setup-details">
+              <summary>Configuración inicial de Apps Script</summary>
+              <ol>
+                <li>Abre <code>script.google.com</code> y crea un proyecto nuevo.</li>
+                <li>Copia el contenido de <code>APPS_SCRIPT/Code.gs</code> incluido con HomeTasks.</li>
+                <li>Sustituye <code>CAMBIA_ESTA_CLAVE</code> por una clave larga. Usa exactamente la misma clave en HomeTasks.</li>
+                <li>Implementa el script como <strong>Aplicación web</strong>, ejecutándolo como tú y permitiendo acceso a <strong>Cualquiera</strong>.</li>
+                <li>Copia la URL terminada en <code>/exec</code>, pégala arriba y pulsa <strong>Probar conexión</strong>.</li>
+              </ol>
+            </details>
+          </article>
+
+          <article class="card settings-card backup-card">
+            <h3>Copia local</h3>
+            <p>Exporta una copia completa en JSON o restaura una copia anterior. Es independiente del proveedor de sincronización.</p>
+            <div class="sync-actions">
+              <button id="exportBackupButton" class="secondary-button" type="button">Exportar copia</button>
+              <button id="importBackupButton" class="secondary-button" type="button">Importar copia</button>
+              <input id="importBackupFile" type="file" accept="application/json,.json" hidden />
+            </div>
+          </article>
+
+          <article class="card settings-card">
+            <h3>Datos locales</h3>
+            <p>Restablece HomeTasks a los datos iniciales de V4.1. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V4.1</button>
+          </article>
+
+          <article class="card settings-card">
+            <h3>Instalacion</h3>
+            <p id="installHelp">Abre HomeTasks desde HTTPS o localhost para instalarla como PWA.</p>
+            <button id="installButton" class="secondary-button" type="button" hidden>Instalar HomeTasks</button>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Navegacion principal">
+      <button class="nav-item active" data-view="home" type="button"><span>⌂</span><small>Casa</small></button>
+      <button class="nav-item" data-view="plan" type="button"><span>▦</span><small>Plan</small></button>
+      <button class="nav-item" data-view="tasks" type="button"><span>✓</span><small>Tareas</small></button>
+      <button class="nav-item" data-view="routines" type="button"><span>↻</span><small>Rutinas</small></button>
+      <button class="nav-item" data-view="history" type="button"><span>◷</span><small>Historico</small></button>
+      <button class="nav-item" data-view="settings" type="button"><span>⚙</span><small>Ajustes</small></button>
+    </nav>
+  </div>
+
+  <dialog id="taskDialog" class="task-dialog">
+    <form id="taskForm" method="dialog">
+      <div class="dialog-header">
+        <div>
+          <p id="taskDialogEyebrow" class="eyebrow">Nueva actividad</p>
+          <h2 id="taskDialogTitle">Anadir tarea</h2>
+        </div>
+        <button id="closeDialogButton" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+
+      <div class="form-grid">
+        <label class="full-width">
+          <span>Tarea</span>
+          <input id="taskTitle" name="title" type="text" required maxlength="80" placeholder="Ej. Vaciar lavavajillas" />
+        </label>
+        <label>
+          <span>Estancia</span>
+          <select id="taskRoom" name="roomId" required></select>
+        </label>
+        <label>
+          <span>Responsable</span>
+          <select id="taskAssignee" name="assigneeId"></select>
+        </label>
+        <label>
+          <span>Fecha</span>
+          <input id="taskDueDate" name="dueDate" type="date" />
+        </label>
+        <label>
+          <span>Prioridad</span>
+          <select id="taskPriority" name="priority">
+            <option value="normal">Normal</option>
+            <option value="high">Alta</option>
+          </select>
+        </label>
+        <label>
+          <span>Repeticion</span>
+          <select id="taskRecurrence" name="recurrence">
+            <option value="none">No repetir</option>
+            <option value="daily">Cada dia</option>
+            <option value="weekly">Cada semana</option>
+            <option value="monthly">Cada mes</option>
+            <option value="custom">Cada X dias</option>
+          </select>
+        </label>
+        <label id="taskRecurrenceDaysWrap" hidden>
+          <span>Intervalo en dias</span>
+          <input id="taskRecurrenceDays" name="recurrenceDays" type="number" min="2" max="365" value="2" />
+        </label>
+      </div>
+
+      <div class="dialog-actions">
+        <button id="cancelDialogButton" class="secondary-button" type="button">Cancelar</button>
+        <button id="saveTaskButton" class="primary-button" type="submit">Guardar tarea</button>
+      </div>
+    </form>
+  </dialog>
+
+
+  <dialog id="routineDialog" class="task-dialog">
+    <form id="routineForm" method="dialog">
+      <div class="dialog-header">
+        <div>
+          <p id="routineDialogEyebrow" class="eyebrow">Plantilla domestica</p>
+          <h2 id="routineDialogTitle">Nueva rutina</h2>
+        </div>
+        <button id="closeRoutineDialogButton" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="form-grid">
+        <label class="full-width">
+          <span>Actividad</span>
+          <input id="routineTitle" type="text" maxlength="80" required placeholder="Ej. Limpiar cocina" />
+        </label>
+        <label>
+          <span>Estancia</span>
+          <select id="routineRoom" required></select>
+        </label>
+        <label>
+          <span>Responsable habitual</span>
+          <select id="routineAssignee"></select>
+        </label>
+        <label>
+          <span>Prioridad</span>
+          <select id="routinePriority">
+            <option value="normal">Normal</option>
+            <option value="high">Alta</option>
+          </select>
+        </label>
+        <label>
+          <span>Repeticion al crear</span>
+          <select id="routineRecurrence">
+            <option value="none">No repetir</option>
+            <option value="daily">Cada dia</option>
+            <option value="weekly">Cada semana</option>
+            <option value="monthly">Cada mes</option>
+            <option value="custom">Cada X dias</option>
+          </select>
+        </label>
+        <label id="routineRecurrenceDaysWrap" hidden>
+          <span>Intervalo en dias</span>
+          <input id="routineRecurrenceDays" type="number" min="2" max="365" value="2" />
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button id="cancelRoutineDialogButton" class="secondary-button" type="button">Cancelar</button>
+        <button class="primary-button" type="submit">Guardar rutina</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
