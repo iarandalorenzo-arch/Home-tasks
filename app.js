@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '4.1.3';
+const APP_VERSION = '4.1.4';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -1584,17 +1584,24 @@ async function syncNow(options = {}) {
     state.syncBusy = true;
     if (!silent && els.syncNowButton) els.syncNowButton.disabled = true;
     const provider = activeSyncProvider();
+    const dirty = localStorage.getItem(LS_CLOUD_DIRTY) === '1';
     const [local, remote] = await Promise.all([buildSyncSnapshot(), provider.pull()]);
-    const merged = remote ? mergeSnapshots(local, remote) : local;
-    const confirmed = await provider.push(merged);
-    const finalSnapshot = confirmed ? mergeSnapshots(merged, confirmed) : merged;
+    let finalSnapshot = remote ? mergeSnapshots(local, remote) : local;
+
+    // Only write to Apps Script when this device actually has local changes.
+    // Clean devices still pull and apply remote changes immediately.
+    if (dirty) {
+      const confirmed = await provider.push(finalSnapshot);
+      if (confirmed) finalSnapshot = mergeSnapshots(finalSnapshot, confirmed);
+      localStorage.setItem(LS_CLOUD_DIRTY, '0');
+    }
+
     await applySnapshot(finalSnapshot, { replace: true });
     localStorage.setItem(LS_LAST_SYNC, String(Date.now()));
-    localStorage.setItem(LS_CLOUD_DIRTY, '0');
     state.syncStatus = await provider.status();
     await loadState();
     renderAll();
-    if (!silent) showToast('Sincronización completada');
+    if (!silent) showToast(dirty ? 'Sincronización completada' : 'Datos actualizados desde la nube');
   } catch (error) {
     console.error(error);
     if (!silent) alert(`No se ha podido sincronizar.\n\n${error.message}`);
@@ -1615,11 +1622,26 @@ function unlinkCloudDevice() {
 }
 
 function setupAutoSync() {
+  const canAutoSync = () => els.autoSyncToggle?.checked && syncConfigured() && syncLinked() && navigator.onLine;
+
+  // Pull shortly after startup so a second device sees remote changes without waiting.
+  setTimeout(() => {
+    if (canAutoSync()) syncNow({ silent: true });
+  }, 1200);
+
+  // While HomeTasks is open, refresh the cloud periodically.
   setInterval(() => {
-    if (els.autoSyncToggle?.checked && syncConfigured() && syncLinked() && navigator.onLine) syncNow({ silent: true });
-  }, 120000);
+    if (canAutoSync()) syncNow({ silent: true });
+  }, 60000);
+
+  // Always refresh when the app returns to the foreground, even when this device
+  // has no local changes. This is essential for receiving changes from other devices.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && els.autoSyncToggle?.checked && localStorage.getItem(LS_CLOUD_DIRTY) === '1') syncNow({ silent: true });
+    if (document.visibilityState === 'visible' && canAutoSync()) syncNow({ silent: true });
+  });
+
+  window.addEventListener('online', () => {
+    if (canAutoSync()) setTimeout(() => syncNow({ silent: true }), 500);
   });
 }
 
