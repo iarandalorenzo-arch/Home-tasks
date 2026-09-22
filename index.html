@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#f6f7f9" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="description" content="HomeTasks - gestor domestico ligero y offline-first" />
+  <meta name="description" content="HomeTasks - planificador ligero, offline-first y multiusuario" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V8.1.1</title>
+  <title>HomeTasks V8.1.2</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,7 +19,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V8.1.1 · planificación horaria</p>
+          <p class="subtitle">V8.1.2 · planificación horaria</p>
         </div>
       </div>
       <div class="top-actions">
@@ -129,7 +129,7 @@
         <article class="card filter-card">
           <div class="filters">
             <label>
-              <span>Estancia</span>
+              <span>Ubicación</span>
               <select id="roomFilter"><option value="all">Todas</option></select>
             </label>
             <label>
@@ -146,7 +146,7 @@
             </label>
             <label class="search-field">
               <span>Buscar</span>
-              <input id="taskSearch" type="search" placeholder="Lavavajillas, cocina..." autocomplete="off" />
+              <input id="taskSearch" type="search" placeholder="Lavavajillas, coche, cocina..." autocomplete="off" />
             </label>
           </div>
         </article>
@@ -158,7 +158,7 @@
       <section id="view-plan" class="view" aria-labelledby="planTitle">
         <div class="section-heading task-heading">
           <div>
-            <p class="eyebrow">Agenda doméstica</p>
+            <p class="eyebrow">Agenda y disponibilidad</p>
             <h2 id="planTitle">Plan semanal</h2>
             <p class="section-note">Calendario horario de 06:00 a 24:00. Selecciona una persona para ver sus horas de trabajo, tareas y huecos libres.</p>
           </div>
@@ -175,6 +175,7 @@
               <span class="planner-label">Semana</span>
               <strong id="planWeekLabel">—</strong>
             </div>
+            <div class="plan-work-legend" aria-label="Leyenda del plan"><i></i><span>Trabajo / no disponible</span></div>
             <label class="planner-person-filter">
               <span>Persona</span>
               <select id="planAssigneeFilter"><option value="all">Todas</option></select>
@@ -197,8 +198,8 @@
           <article class="card planner-panel">
             <div class="card-header compact">
               <div>
-                <h3>Reparto</h3>
-                <p>Carga pendiente y actividad reciente.</p>
+                <h3>Reparto doméstico</h3>
+                <p>Carga de la vivienda; excluye NA / Fuera de casa.</p>
               </div>
             </div>
             <div id="workloadSummary" class="workload-summary"></div>
@@ -209,7 +210,7 @@
       <section id="view-routines" class="view" aria-labelledby="routinesTitle">
         <div class="section-heading task-heading">
           <div>
-            <p class="eyebrow">Plantillas domesticas</p>
+            <p class="eyebrow">Plantillas y rutinas</p>
             <h2 id="routinesTitle">Rutinas</h2>
             <p class="section-note">Crea tareas en un toque y deja definida su repeticion y responsable habitual.</p>
           </div>
@@ -224,7 +225,7 @@
         <article class="card filter-card">
           <div class="filters routine-filters">
             <label>
-              <span>Estancia</span>
+              <span>Ubicación</span>
               <select id="routineRoomFilter"><option value="all">Todas</option></select>
             </label>
             <label class="search-field">
@@ -265,14 +266,14 @@
         <div class="activity-grid">
           <article class="card activity-panel people-panel">
             <div class="card-header compact">
-              <div><h3>Reparto por persona</h3><p>Actividad completada en el periodo y carga pendiente actual.</p></div>
+              <div><h3>Reparto doméstico por persona</h3><p>Solo tareas asociadas a una estancia de la vivienda; NA / Fuera de casa no computa.</p></div>
             </div>
             <div id="statsPeople" class="stats-bars"></div>
           </article>
 
           <article class="card activity-panel rooms-panel">
             <div class="card-header compact">
-              <div><h3>Actividad por estancia</h3><p>Dónde se concentra el trabajo doméstico.</p></div>
+              <div><h3>Actividad por estancia</h3><p>Dónde se concentra el trabajo doméstico. Se excluye NA / Fuera de casa.</p></div>
             </div>
             <div id="statsRooms" class="stats-bars"></div>
           </article>
@@ -298,7 +299,7 @@
               <select id="historyUserFilter"><option value="all">Todas</option></select>
             </label>
             <label>
-              <span>Estancia</span>
+              <span>Ubicación</span>
               <select id="historyRoomFilter"><option value="all">Todas</option></select>
             </label>
           </div>
@@ -326,7 +327,8 @@
                 <button id="saveHouseNameButton" class="secondary-button" type="button">Guardar</button>
               </div>
             </label>
-            <div class="setting-row"><span>Estancias</span><strong>10</strong></div>
+            <div class="setting-row"><span>Estancias domésticas</span><strong>10</strong></div>
+            <div class="setting-row"><span>Ubicación general</span><strong>NA / Fuera de casa</strong></div>
             <div class="setting-row"><span>Plano</span><strong>Integrado V8.1</strong></div>
           </article>
 
@@ -347,8 +349,8 @@
           <article class="card settings-card rooms-card">
             <div class="settings-title-row">
               <div>
-                <h3>Nombres de estancias</h3>
-                <p>Puedes corregir los nombres sin modificar la geometria del plano.</p>
+                <h3>Nombres de ubicaciones</h3>
+                <p>Puedes corregir los nombres. NA / Fuera de casa no aparece en el plano ni computa en el reparto doméstico.</p>
               </div>
             </div>
             <div id="roomSettingsList" class="room-settings-list"></div>
@@ -360,7 +362,7 @@
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Version</span><strong>8.1.1</strong></div>
+            <div class="setting-row"><span>Version</span><strong>8.1.2</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -478,7 +480,7 @@
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">8.1.1</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">8.1.2</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -518,7 +520,7 @@
           <input id="taskTitle" name="title" type="text" required maxlength="80" placeholder="Ej. Vaciar lavavajillas" />
         </label>
         <label>
-          <span>Estancia</span>
+          <span>Ubicación</span>
           <select id="taskRoom" name="roomId" required></select>
         </label>
         <label>
@@ -606,7 +608,7 @@
     <form id="routineForm" method="dialog">
       <div class="dialog-header">
         <div>
-          <p id="routineDialogEyebrow" class="eyebrow">Plantilla domestica</p>
+          <p id="routineDialogEyebrow" class="eyebrow">Plantilla de actividad</p>
           <h2 id="routineDialogTitle">Nueva rutina</h2>
         </div>
         <button id="closeRoutineDialogButton" class="icon-button" type="button" aria-label="Cerrar">×</button>
@@ -617,7 +619,7 @@
           <input id="routineTitle" type="text" maxlength="80" required placeholder="Ej. Limpiar cocina" />
         </label>
         <label>
-          <span>Estancia</span>
+          <span>Ubicación</span>
           <select id="routineRoom" required></select>
         </label>
         <label>
@@ -704,7 +706,7 @@
         <div><p class="eyebrow">Disponibilidad personal</p><h2 id="workScheduleTitle">Horario de trabajo</h2></div>
         <button id="closeWorkScheduleButton" class="icon-button" type="button" aria-label="Cerrar">×</button>
       </div>
-      <p class="section-note">Las franjas de trabajo se consideran no disponibles para tareas domésticas. El plan usa intervalos de 15 minutos entre las 06:00 y las 24:00.</p>
+      <p class="section-note">Las franjas de trabajo se consideran no disponibles para tareas asignadas. El plan usa intervalos de 15 minutos entre las 06:00 y las 24:00.</p>
       <div id="workScheduleDays" class="work-schedule-days"></div>
       <div class="dialog-actions"><button id="cancelWorkScheduleButton" class="secondary-button" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar horario</button></div>
     </form>

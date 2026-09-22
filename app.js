@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '8.1.1';
+const APP_VERSION = '8.1.2';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -89,6 +89,7 @@ const PLAN_START_MINUTES = 6 * 60;
 const PLAN_END_MINUTES = 24 * 60;
 const PLAN_SLOT_MINUTES = 15;
 const DEFAULT_TASK_DURATION = 30;
+const NA_ROOM_ID = 'na';
 const WEEKDAY_KEYS = ['sun','mon','tue','wed','thu','fri','sat'];
 const WORKDAY_LABELS = [['mon','Lunes'],['tue','Martes'],['wed','Miércoles'],['thu','Jueves'],['fri','Viernes'],['sat','Sábado'],['sun','Domingo']];
 function defaultWorkSchedule(){return Object.fromEntries(WORKDAY_LABELS.map(([key])=>[key,{active:false,start:'08:00',end:'17:00'}]));}
@@ -97,7 +98,7 @@ function timeToMinutes(value){if(!/^\d{2}:\d{2}$/.test(String(value||'')))return
 function minutesToTime(total){const n=Math.max(0,Math.min(1440,Number(total)||0));return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;}
 function normalizedDuration(value){const n=Number(value);return Number.isFinite(n)?Math.max(5,Math.min(480,Math.round(n/5)*5)):DEFAULT_TASK_DURATION;}
 function intervalsOverlap(aStart,aEnd,bStart,bEnd){return aStart<bEnd&&bStart<aEnd;}
-function workBlockForDate(user,dateISO){if(!user||!dateISO)return null;const date=new Date(`${dateISO}T12:00:00`);const item=normalizeWorkSchedule(user.workSchedule)[WEEKDAY_KEYS[date.getDay()]];if(!item?.active)return null;const start=timeToMinutes(item.start),end=timeToMinutes(item.end);return start!==null&&end!==null&&end>start?{start,end,...item}:null;}
+function workBlockForDate(user,dateISO){if(!user||!dateISO)return null;const date=new Date(`${dateISO}T12:00:00`);const item=normalizeWorkSchedule(user.workSchedule)[WEEKDAY_KEYS[date.getDay()]];if(!item?.active)return null;const start=timeToMinutes(item.start),end=timeToMinutes(item.end);return start!==null&&end!==null&&end>start?{...item,start,end}:null;}
 function slotConflicts(assigneeId,dateISO,startMinute,durationMinutes,excludeTaskId=null){if(!assigneeId||!dateISO||startMinute===null)return{ok:true};const duration=normalizedDuration(durationMinutes),endMinute=startMinute+duration;if(startMinute<PLAN_START_MINUTES||endMinute>PLAN_END_MINUTES)return{ok:false,reason:'La tarea debe quedar entre las 06:00 y las 24:00.'};const user=userById(assigneeId),work=workBlockForDate(user,dateISO);if(work&&intervalsOverlap(startMinute,endMinute,work.start,work.end))return{ok:false,reason:`${user?.name||'La persona'} trabaja de ${minutesToTime(work.start)} a ${minutesToTime(work.end)}.`};const conflict=state.tasks.find(task=>task.id!==excludeTaskId&&!task.completed&&task.assigneeId===assigneeId&&task.dueDate===dateISO&&task.dueTime&&intervalsOverlap(startMinute,endMinute,timeToMinutes(task.dueTime),timeToMinutes(task.dueTime)+normalizedDuration(task.durationMinutes)));return conflict?{ok:false,reason:`Coincide con “${conflict.title}” (${conflict.dueTime}–${minutesToTime(timeToMinutes(conflict.dueTime)+normalizedDuration(conflict.durationMinutes))}).`}:{ok:true};}
 function findFreeSlots(assigneeId,startDateISO,durationMinutes,{limit=6,maxDays=14,preferredMinute=null,excludeTaskId=null}={}){if(!assigneeId)return[];const result=[],duration=normalizedDuration(durationMinutes);let date=new Date(`${startDateISO||todayISO()}T12:00:00`);for(let dayOffset=0;dayOffset<maxDays&&result.length<limit;dayOffset++){const iso=localISO(date);let first=PLAN_START_MINUTES;if(dayOffset===0&&preferredMinute!==null)first=Math.max(first,preferredMinute);if(iso===todayISO()){const now=new Date(),current=now.getHours()*60+now.getMinutes();first=Math.max(first,Math.ceil(current/PLAN_SLOT_MINUTES)*PLAN_SLOT_MINUTES);}first=Math.ceil(first/PLAN_SLOT_MINUTES)*PLAN_SLOT_MINUTES;for(let minute=first;minute+duration<=PLAN_END_MINUTES&&result.length<limit;minute+=PLAN_SLOT_MINUTES)if(slotConflicts(assigneeId,iso,minute,duration,excludeTaskId).ok)result.push({date:iso,time:minutesToTime(minute),duration});date.setDate(date.getDate()+1);}return result;}
 function firstFreeSlotOnDate(assigneeId,dateISO,durationMinutes,preferredTime='',excludeTaskId=null){const preferred=timeToMinutes(preferredTime);return findFreeSlots(assigneeId,dateISO,durationMinutes,{limit:1,maxDays:1,preferredMinute:preferred,excludeTaskId})[0]||null;}
@@ -114,13 +115,16 @@ const defaultRooms = [
   { id: 'pablo', name: 'Dormitorio Pablo', order: 8 },
   { id: 'bath1', name: 'Baño 1', order: 9 },
   { id: 'master', name: 'Dormitorio principal', order: 10 },
+  { id: NA_ROOM_ID, name: 'NA / Fuera de casa', order: 11, countsDomestic: false, virtual: true },
 ];
 
 function normalizeRooms(items = []) {
   const byId = new Map((Array.isArray(items) ? items : []).filter(item => item && item.id).map(item => [item.id, item]));
   return defaultRooms.map(def => {
     const existing = byId.get(def.id);
-    return existing ? { ...def, ...existing, id: def.id, order: def.order } : { ...def };
+    const merged = existing ? { ...def, ...existing, id: def.id, order: def.order } : { ...def };
+    if (def.id === NA_ROOM_ID) return { ...merged, countsDomestic: false, virtual: true };
+    return merged;
   });
 }
 
@@ -303,6 +307,11 @@ function settingValue(id, fallback = '') {
 
 function roomById(id) {
   return state.rooms.find(room => room.id === id);
+}
+
+function isDomesticRoomId(id) {
+  if (!id || id === NA_ROOM_ID) return false;
+  return roomById(id)?.countsDomestic !== false;
 }
 
 function userById(id) {
@@ -646,7 +655,7 @@ function openRoomTasks(roomId) {
 
 function renderRoomSummary() {
   if (!els.roomSummary) return;
-  els.roomSummary.innerHTML = state.rooms.map(room => {
+  els.roomSummary.innerHTML = state.rooms.filter(room => isDomesticRoomId(room.id)).map(room => {
     const stats = roomStats(room.id);
     const status = stats.overdue ? 'overdue' : stats.count > 0 ? 'pending' : 'ok';
     return `<button class="room-summary-row" type="button" data-room-id="${room.id}"><span>${escapeHTML(room.name)}</span><b class="room-summary-count ${status}">${stats.count}</b></button>`;
@@ -675,7 +684,7 @@ function renderFilters() {
 
   const roomOptions = optionMarkup(normalizeRooms(state.rooms), room => room.id, room => room.name);
   const userOptions = optionMarkup(state.users, user => user.id, user => user.name);
-  const templateOptions = optionMarkup(state.templates, template => template.id, template => `${roomById(template.roomId)?.name || 'Sin estancia'} · ${template.title}`);
+  const templateOptions = optionMarkup(state.templates, template => template.id, template => `${roomById(template.roomId)?.name || 'Sin ubicación'} · ${template.title}`);
 
   els.roomFilter.innerHTML = `<option value="all">Todas</option>${roomOptions}`;
   els.historyRoomFilter.innerHTML = `<option value="all">Todas</option>${roomOptions}`;
@@ -739,7 +748,7 @@ function renderSummary() {
     } else {
       const person = userName(next.assigneeId, next.assigneeName);
       els.nextTask.className = 'next-task';
-      els.nextTask.innerHTML = `<strong>${escapeHTML(next.title)}</strong><span>${escapeHTML(roomById(next.roomId)?.name || 'Sin estancia')} · ${escapeHTML(person)} · ${formatDate(next.dueDate)}</span>`;
+      els.nextTask.innerHTML = `<strong>${escapeHTML(next.title)}</strong><span>${escapeHTML(roomById(next.roomId)?.name || 'Sin ubicación')} · ${escapeHTML(person)} · ${formatDate(next.dueDate)}</span>`;
     }
   }
 }
@@ -765,7 +774,7 @@ function todayAssigneeOptions(task) {
 }
 
 function todayTaskMarkup(task, { showDate = false, compact = false } = {}) {
-  const room = roomById(task.roomId)?.name || 'Sin estancia';
+  const room = roomById(task.roomId)?.name || 'Sin ubicación';
   const person = userName(task.assigneeId, task.assigneeName);
   const waiting = isWaitingTask(task);
   const datePart = showDate ? `<span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}${task.dueTime ? ` · ${escapeHTML(task.dueTime)}` : ''}</span>` : '';
@@ -873,7 +882,7 @@ function renderToday() {
     .sort((a, b) => b.completedAt - a.completedAt)
     .slice(0, 6);
   els.todayRecentHistory.innerHTML = recent.length ? recent.map(item => {
-    const room = roomById(item.roomId)?.name || item.roomName || 'Sin estancia';
+    const room = roomById(item.roomId)?.name || item.roomName || 'Sin ubicación';
     const person = userName(item.assigneeId, item.assigneeName);
     const when = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(item.completedAt));
     return `<div class="today-history-row"><span class="today-history-check">✓</span><span><strong>${escapeHTML(item.title)}</strong><small>${escapeHTML(room)} · ${escapeHTML(person)}</small></span><time>${when}</time></div>`;
@@ -907,7 +916,7 @@ function renderActiveRoomHint() {
     return;
   }
   const room = roomById(roomId);
-  els.activeRoomHint.textContent = `Mostrando ${room?.name || 'estancia seleccionada'}`;
+  els.activeRoomHint.textContent = `Mostrando ${room?.name || 'ubicación seleccionada'}`;
   els.activeRoomHint.hidden = false;
   els.clearRoomFilterButton.hidden = false;
 }
@@ -921,7 +930,7 @@ function renderTasks() {
   }
 
   els.taskList.innerHTML = tasks.map(task => {
-    const room = roomById(task.roomId)?.name || 'Sin estancia';
+    const room = roomById(task.roomId)?.name || 'Sin ubicación';
     const person = userName(task.assigneeId, task.assigneeName);
     const nextTemplate = task.nextTemplateId ? templateById(task.nextTemplateId) : null;
     const waiting = isWaitingTask(task);
@@ -1041,6 +1050,12 @@ function renderActivityStats() {
   const pendingTasks = state.tasks.filter(task => !task.completed && !isWaitingTask(task));
   const overdue = pendingTasks.filter(isOverdue).length;
 
+  // Las métricas generales incluyen todas las actividades. El bloque de reparto
+  // doméstico excluye expresamente la ubicación NA / Fuera de casa.
+  const domesticHistory = history.filter(item => isDomesticRoomId(item.roomId));
+  const domesticPending = pendingTasks.filter(task => isDomesticRoomId(task.roomId));
+  const domesticTotal = domesticHistory.length;
+
   els.statsCompleted.textContent = total;
   els.statsActiveDays.textContent = activeDays;
   els.statsPending.textContent = pendingTasks.length;
@@ -1048,21 +1063,21 @@ function renderActivityStats() {
   els.statsPeriodLabel.textContent = statsPeriodText();
 
   const personRows = state.users.map(user => {
-    const done = history.filter(item => item.assigneeId === user.id).length;
-    const pending = pendingTasks.filter(task => task.assigneeId === user.id).length;
-    const overdueCount = pendingTasks.filter(task => task.assigneeId === user.id && isOverdue(task)).length;
+    const done = domesticHistory.filter(item => item.assigneeId === user.id).length;
+    const pending = domesticPending.filter(task => task.assigneeId === user.id).length;
+    const overdueCount = domesticPending.filter(task => task.assigneeId === user.id && isOverdue(task)).length;
     return { id: user.id, name: user.name, done, pending, overdue: overdueCount };
   });
-  const unassignedDone = history.filter(item => !item.assigneeId).length;
-  const unassignedPending = pendingTasks.filter(task => !task.assigneeId).length;
-  const unassignedOverdue = pendingTasks.filter(task => !task.assigneeId && isOverdue(task)).length;
+  const unassignedDone = domesticHistory.filter(item => !item.assigneeId).length;
+  const unassignedPending = domesticPending.filter(task => !task.assigneeId).length;
+  const unassignedOverdue = domesticPending.filter(task => !task.assigneeId && isOverdue(task)).length;
   if (unassignedDone || unassignedPending) personRows.push({ id: 'unassigned', name: 'Sin asignar', done: unassignedDone, pending: unassignedPending, overdue: unassignedOverdue });
 
   if (!personRows.length) {
-    els.statsPeople.innerHTML = '<div class="stats-empty">Añade personas para analizar el reparto.</div>';
+    els.statsPeople.innerHTML = '<div class="stats-empty">Añade personas para analizar el reparto doméstico.</div>';
   } else {
     els.statsPeople.innerHTML = personRows.map(item => {
-      const share = total ? Math.round(item.done * 100 / total) : 0;
+      const share = domesticTotal ? Math.round(item.done * 100 / domesticTotal) : 0;
       const initial = item.id === 'unassigned' ? '?' : (item.name.trim().charAt(0).toUpperCase() || '?');
       return `<div class="stats-bar-row">
         <div class="stats-bar-head"><span class="stats-entity"><i>${escapeHTML(initial)}</i><b>${escapeHTML(item.name)}</b></span><span><strong>${item.done}</strong> hechas · ${share}%</span></div>
@@ -1072,10 +1087,10 @@ function renderActivityStats() {
     }).join('');
   }
 
-  els.statsRooms.innerHTML = state.rooms.map(room => {
-    const done = history.filter(item => item.roomId === room.id).length;
-    const pending = pendingTasks.filter(task => task.roomId === room.id).length;
-    const share = total ? Math.round(done * 100 / total) : 0;
+  els.statsRooms.innerHTML = state.rooms.filter(room => isDomesticRoomId(room.id)).map(room => {
+    const done = domesticHistory.filter(item => item.roomId === room.id).length;
+    const pending = domesticPending.filter(task => task.roomId === room.id).length;
+    const share = domesticTotal ? Math.round(done * 100 / domesticTotal) : 0;
     return `<div class="stats-bar-row room-stat-row">
       <div class="stats-bar-head"><span class="stats-room-name"><b>${escapeHTML(room.name)}</b></span><span><strong>${done}</strong> hechas · ${share}%</span></div>
       <div class="stats-bar-track"><span style="width:${Math.max(0, Math.min(100, share))}%"></span></div>
@@ -1094,7 +1109,6 @@ function renderActivityStats() {
     </div>`;
   }).join('');
 }
-
 function renderHistory() {
   const history = getFilteredHistory();
   if (history.length === 0) {
@@ -1105,7 +1119,7 @@ function renderHistory() {
   els.historyList.innerHTML = history.map(item => {
     const date = new Date(item.completedAt);
     const time = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date);
-    const roomName = roomById(item.roomId)?.name || item.roomName || 'Sin estancia';
+    const roomName = roomById(item.roomId)?.name || item.roomName || 'Sin ubicación';
     const person = userName(item.assigneeId, item.assigneeName);
     return `<div class="history-row">
       <div class="history-time">${time}</div>
@@ -1146,7 +1160,7 @@ function renderRoutines() {
     return;
   }
   els.routineList.innerHTML = templates.map(template => {
-    const room = roomById(template.roomId)?.name || 'Sin estancia';
+    const room = roomById(template.roomId)?.name || 'Sin ubicación';
     const person = userName(template.assigneeId, 'Sin asignar');
     return `<article class="routine-card" data-template-id="${template.id}">
       <div class="routine-main">
@@ -1210,7 +1224,7 @@ function openRoutineDialog(templateId = null) {
     els.routineAutoGenerate.checked = !!template.autoGenerate;
     els.routineNextRunDate.value = template.nextRunDate || todayISO();
   } else {
-    els.routineDialogEyebrow.textContent = 'Plantilla doméstica';
+    els.routineDialogEyebrow.textContent = 'Plantilla de actividad';
     els.routineDialogTitle.textContent = 'Nueva rutina';
     els.routineForm.reset();
     els.routinePriority.value = 'normal';
@@ -1295,8 +1309,8 @@ function formatWeekLabel(start, end) {
 }
 
 function scheduleBlockStyle(startMinute,durationMinute,{normalize=true}={}){const total=PLAN_END_MINUTES-PLAN_START_MINUTES,start=Number(startMinute),duration=normalize?normalizedDuration(durationMinute):Math.max(0,Number(durationMinute)||0);if(!Number.isFinite(start)||duration<=0)return'display:none';const end=start+duration,visibleStart=Math.max(PLAN_START_MINUTES,start),visibleEnd=Math.min(PLAN_END_MINUTES,end);if(visibleEnd<=visibleStart)return'display:none';const top=(visibleStart-PLAN_START_MINUTES)/total*100,height=Math.max(0.45,(visibleEnd-visibleStart)/total*100);return`top:${top.toFixed(4)}%;height:${height.toFixed(4)}%`;}
-function planCalendarTaskMarkup(task,showPerson=false){const start=timeToMinutes(task.dueTime);if(start===null)return'';const duration=normalizedDuration(task.durationMinutes),room=roomById(task.roomId)?.name||'Sin estancia',person=userName(task.assigneeId,task.assigneeName);return`<button class="calendar-task ${task.priority==='high'?'high':''}" style="${scheduleBlockStyle(start,duration)}" type="button" data-task-id="${task.id}" title="${escapeHTML(task.title)} · ${task.dueTime}–${minutesToTime(start+duration)}"><strong>${escapeHTML(task.title)}</strong><span>${escapeHTML(task.dueTime)}–${escapeHTML(minutesToTime(start+duration))} · ${escapeHTML(room)}</span>${showPerson?`<small>${escapeHTML(person)}</small>`:''}</button>`;}
-function renderPlan(){if(!els.weeklyPlanner)return;const start=weekStartForOffset(state.planWeekOffset),end=addDaysToDate(start,6),startISO=localISO(start),endISO=localISO(end);els.planWeekLabel.textContent=formatWeekLabel(start,end);const selected=els.planAssigneeFilter.value,selectedUser=selected&&selected!=='all'&&selected!=='unassigned'?userById(selected):null,dayNames=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'],days=Array.from({length:7},(_,i)=>addDaysToDate(start,i));const hourLabels=Array.from({length:19},(_,i)=>6+i).map(hour=>`<span style="top:${((hour*60-PLAN_START_MINUTES)/(PLAN_END_MINUTES-PLAN_START_MINUTES)*100).toFixed(4)}%">${String(hour).padStart(2,'0')}:00</span>`).join('');const columns=days.map((date,index)=>{const iso=localISO(date),isToday=iso===todayISO(),tasks=state.tasks.filter(task=>!task.completed&&task.dueDate===iso&&task.dueTime&&taskMatchesPlanAssignee(task));let work='';if(selectedUser){const block=workBlockForDate(selectedUser,iso);if(block)work=`<div class="calendar-work" style="${scheduleBlockStyle(block.start,block.end-block.start,{normalize:false})}" title="${escapeHTML(selectedUser.name)} · Trabajo ${minutesToTime(block.start)}–${minutesToTime(block.end)}"><strong>Trabajo</strong><span>${minutesToTime(block.start)}–${minutesToTime(block.end)}</span></div>`;}else if(selected==='all'&&state.users.length){const laneCount=Math.min(state.users.length,6);work=state.users.slice(0,laneCount).map((user,lane)=>{const block=workBlockForDate(user,iso);if(!block)return'';const gap=1.2,laneWidth=(100-gap*(laneCount+1))/laneCount,left=gap+lane*(laneWidth+gap);return`<div class="calendar-work calendar-work-lane" style="${scheduleBlockStyle(block.start,block.end-block.start,{normalize:false})};left:${left.toFixed(2)}%;right:auto;width:${laneWidth.toFixed(2)}%" title="${escapeHTML(user.name)} · Trabajo ${minutesToTime(block.start)}–${minutesToTime(block.end)}"><strong>${escapeHTML(user.name)}</strong><span>${minutesToTime(block.start)}–${minutesToTime(block.end)}</span></div>`;}).join('');}return`<div class="calendar-day-column ${isToday?'today':''}" data-date="${iso}"><div class="calendar-day-header"><span>${dayNames[index]}</span><strong>${date.getDate()}</strong><button class="plan-add-day" type="button" title="Nueva tarea">+</button></div><div class="calendar-day-track">${work}${tasks.map(task=>planCalendarTaskMarkup(task,!selectedUser)).join('')}</div></div>`;}).join('');els.weeklyPlanner.innerHTML=`<div class="schedule-calendar-shell"><div class="calendar-time-axis"><div class="calendar-axis-head"></div><div class="calendar-time-track">${hourLabels}</div></div><div class="calendar-days-grid">${columns}</div></div>`;els.weeklyPlanner.querySelectorAll('.calendar-task').forEach(button=>button.addEventListener('click',()=>openTaskDialog(button.dataset.taskId)));els.weeklyPlanner.querySelectorAll('.plan-add-day').forEach(button=>button.addEventListener('click',()=>{const date=button.closest('.calendar-day-column').dataset.date;openTaskDialog(null,date,selectedUser?.id||null);}));const backlog=state.tasks.filter(task=>!task.completed&&taskMatchesPlanAssignee(task)&&(!task.dueDate||isOverdue(task)||(task.assigneeId&&!task.dueTime)));if(!backlog.length)els.planBacklog.innerHTML='<div class="planner-empty">No hay tareas pendientes de programar.</div>';else{els.planBacklog.innerHTML=backlog.map(task=>{const room=roomById(task.roomId)?.name||'Sin estancia',reason=!task.dueDate?'Sin fecha':(task.assigneeId&&!task.dueTime?'Sin hora':`Vencida · ${formatDate(task.dueDate)}`);return`<button class="backlog-row" type="button" data-task-id="${task.id}"><span><strong>${escapeHTML(task.title)}</strong><small>${escapeHTML(room)} · ${escapeHTML(durationText(task.durationMinutes))}</small></span><b>${escapeHTML(reason)}</b></button>`;}).join('');els.planBacklog.querySelectorAll('.backlog-row').forEach(button=>button.addEventListener('click',()=>openTaskDialog(button.dataset.taskId)));}const thirtyDaysAgo=Date.now()-30*86400000,workloadRows=state.users.map(user=>({id:user.id,name:user.name,pending:state.tasks.filter(task=>!task.completed&&task.assigneeId===user.id).length,week:state.tasks.filter(task=>!task.completed&&task.assigneeId===user.id&&task.dueDate>=startISO&&task.dueDate<=endISO).length,done:state.history.filter(item=>item.assigneeId===user.id&&item.completedAt>=thirtyDaysAgo).length})),unassigned=state.tasks.filter(task=>!task.completed&&!task.assigneeId).length;if(!workloadRows.length&&!unassigned)els.workloadSummary.innerHTML='<div class="planner-empty">Añade personas para ver el reparto.</div>';else{const rows=workloadRows.map(item=>`<button class="workload-row" type="button" data-user-id="${item.id}"><span class="workload-name"><i>${escapeHTML(item.name.charAt(0).toUpperCase())}</i>${escapeHTML(item.name)}</span><span><b>${item.week}</b><small>esta semana</small></span><span><b>${item.pending}</b><small>pendientes</small></span><span><b>${item.done}</b><small>hechas 30 d</small></span></button>`).join(''),unassignedRow=unassigned?`<button class="workload-row unassigned" type="button" data-user-id="unassigned"><span class="workload-name"><i>?</i>Sin asignar</span><span><b>—</b><small>esta semana</small></span><span><b>${unassigned}</b><small>pendientes</small></span><span><b>—</b><small>hechas 30 d</small></span></button>`:'';els.workloadSummary.innerHTML=rows+unassignedRow;els.workloadSummary.querySelectorAll('.workload-row').forEach(row=>row.addEventListener('click',()=>{els.assigneeFilter.value=row.dataset.userId;els.statusFilter.value='pending';switchView('tasks');renderTasks();}));}}
+function planCalendarTaskMarkup(task,showPerson=false){const start=timeToMinutes(task.dueTime);if(start===null)return'';const duration=normalizedDuration(task.durationMinutes),room=roomById(task.roomId)?.name||'Sin ubicación',person=userName(task.assigneeId,task.assigneeName);return`<button class="calendar-task ${task.priority==='high'?'high':''}" style="${scheduleBlockStyle(start,duration)}" type="button" data-task-id="${task.id}" title="${escapeHTML(task.title)} · ${task.dueTime}–${minutesToTime(start+duration)}"><strong>${escapeHTML(task.title)}</strong><span>${escapeHTML(task.dueTime)}–${escapeHTML(minutesToTime(start+duration))} · ${escapeHTML(room)}</span>${showPerson?`<small>${escapeHTML(person)}</small>`:''}</button>`;}
+function renderPlan(){if(!els.weeklyPlanner)return;const start=weekStartForOffset(state.planWeekOffset),end=addDaysToDate(start,6),startISO=localISO(start),endISO=localISO(end);els.planWeekLabel.textContent=formatWeekLabel(start,end);const selected=els.planAssigneeFilter.value,selectedUser=selected&&selected!=='all'&&selected!=='unassigned'?userById(selected):null,dayNames=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'],days=Array.from({length:7},(_,i)=>addDaysToDate(start,i));const hourLabels=Array.from({length:19},(_,i)=>6+i).map(hour=>`<span style="top:${((hour*60-PLAN_START_MINUTES)/(PLAN_END_MINUTES-PLAN_START_MINUTES)*100).toFixed(4)}%">${String(hour).padStart(2,'0')}:00</span>`).join('');const columns=days.map((date,index)=>{const iso=localISO(date),isToday=iso===todayISO(),tasks=state.tasks.filter(task=>!task.completed&&task.dueDate===iso&&task.dueTime&&taskMatchesPlanAssignee(task));let work='';if(selectedUser){const block=workBlockForDate(selectedUser,iso);if(block)work=`<div class="calendar-work" style="${scheduleBlockStyle(block.start,block.end-block.start,{normalize:false})}" title="${escapeHTML(selectedUser.name)} · Trabajo ${minutesToTime(block.start)}–${minutesToTime(block.end)}"><strong>Trabajo</strong><span>${minutesToTime(block.start)}–${minutesToTime(block.end)}</span></div>`;}else if(selected==='all'&&state.users.length){const laneCount=Math.min(state.users.length,6);work=state.users.slice(0,laneCount).map((user,lane)=>{const block=workBlockForDate(user,iso);if(!block)return'';const gap=1.2,laneWidth=(100-gap*(laneCount+1))/laneCount,left=gap+lane*(laneWidth+gap);return`<div class="calendar-work calendar-work-lane" style="${scheduleBlockStyle(block.start,block.end-block.start,{normalize:false})};left:${left.toFixed(2)}%;right:auto;width:${laneWidth.toFixed(2)}%" title="${escapeHTML(user.name)} · Trabajo ${minutesToTime(block.start)}–${minutesToTime(block.end)}"><strong>${escapeHTML(user.name)}</strong><span>${minutesToTime(block.start)}–${minutesToTime(block.end)}</span></div>`;}).join('');}return`<div class="calendar-day-column ${isToday?'today':''}" data-date="${iso}"><div class="calendar-day-header"><span>${dayNames[index]}</span><strong>${date.getDate()}</strong><button class="plan-add-day" type="button" title="Nueva tarea">+</button></div><div class="calendar-day-track">${work}${tasks.map(task=>planCalendarTaskMarkup(task,!selectedUser)).join('')}</div></div>`;}).join('');els.weeklyPlanner.innerHTML=`<div class="schedule-calendar-shell"><div class="calendar-time-axis"><div class="calendar-axis-head"></div><div class="calendar-time-track">${hourLabels}</div></div><div class="calendar-days-grid">${columns}</div></div>`;els.weeklyPlanner.querySelectorAll('.calendar-task').forEach(button=>button.addEventListener('click',()=>openTaskDialog(button.dataset.taskId)));els.weeklyPlanner.querySelectorAll('.plan-add-day').forEach(button=>button.addEventListener('click',()=>{const date=button.closest('.calendar-day-column').dataset.date;openTaskDialog(null,date,selectedUser?.id||null);}));const backlog=state.tasks.filter(task=>!task.completed&&taskMatchesPlanAssignee(task)&&(!task.dueDate||isOverdue(task)||(task.assigneeId&&!task.dueTime)));if(!backlog.length)els.planBacklog.innerHTML='<div class="planner-empty">No hay tareas pendientes de programar.</div>';else{els.planBacklog.innerHTML=backlog.map(task=>{const room=roomById(task.roomId)?.name||'Sin ubicación',reason=!task.dueDate?'Sin fecha':(task.assigneeId&&!task.dueTime?'Sin hora':`Vencida · ${formatDate(task.dueDate)}`);return`<button class="backlog-row" type="button" data-task-id="${task.id}"><span><strong>${escapeHTML(task.title)}</strong><small>${escapeHTML(room)} · ${escapeHTML(durationText(task.durationMinutes))}</small></span><b>${escapeHTML(reason)}</b></button>`;}).join('');els.planBacklog.querySelectorAll('.backlog-row').forEach(button=>button.addEventListener('click',()=>openTaskDialog(button.dataset.taskId)));}const thirtyDaysAgo=Date.now()-30*86400000,workloadRows=state.users.map(user=>({id:user.id,name:user.name,pending:state.tasks.filter(task=>!task.completed&&task.assigneeId===user.id&&isDomesticRoomId(task.roomId)).length,week:state.tasks.filter(task=>!task.completed&&task.assigneeId===user.id&&isDomesticRoomId(task.roomId)&&task.dueDate>=startISO&&task.dueDate<=endISO).length,done:state.history.filter(item=>item.assigneeId===user.id&&isDomesticRoomId(item.roomId)&&item.completedAt>=thirtyDaysAgo).length})),unassigned=state.tasks.filter(task=>!task.completed&&!task.assigneeId&&isDomesticRoomId(task.roomId)).length;if(!workloadRows.length&&!unassigned)els.workloadSummary.innerHTML='<div class="planner-empty">Añade personas para ver el reparto.</div>';else{const rows=workloadRows.map(item=>`<button class="workload-row" type="button" data-user-id="${item.id}"><span class="workload-name"><i>${escapeHTML(item.name.charAt(0).toUpperCase())}</i>${escapeHTML(item.name)}</span><span><b>${item.week}</b><small>esta semana</small></span><span><b>${item.pending}</b><small>pendientes</small></span><span><b>${item.done}</b><small>hechas 30 d</small></span></button>`).join(''),unassignedRow=unassigned?`<button class="workload-row unassigned" type="button" data-user-id="unassigned"><span class="workload-name"><i>?</i>Sin asignar</span><span><b>—</b><small>esta semana</small></span><span><b>${unassigned}</b><small>pendientes</small></span><span><b>—</b><small>hechas 30 d</small></span></button>`:'';els.workloadSummary.innerHTML=rows+unassignedRow;els.workloadSummary.querySelectorAll('.workload-row').forEach(row=>row.addEventListener('click',()=>{els.assigneeFilter.value=row.dataset.userId;els.statusFilter.value='pending';switchView('tasks');renderTasks();}));}}
 
 function renderSettings() {
   const houseName = settingValue('houseName', 'Mi casa');
@@ -1489,7 +1503,7 @@ async function toggleTask(id) {
     const chainedTask = await createChainedTask(task, completedAt);
     await put('history', {
       id: makeId(), taskId: task.id, title: task.title, roomId: task.roomId,
-      roomName: roomById(task.roomId)?.name || 'Sin estancia',
+      roomName: roomById(task.roomId)?.name || 'Sin ubicación',
       assigneeId: task.assigneeId || null, assigneeName: userName(task.assigneeId, task.assigneeName),
       completedAt, recurring: true, modifiedAt: completedAt,
     });
@@ -1508,7 +1522,7 @@ async function toggleTask(id) {
   if (completing) {
     await put('history', {
       id: makeId(), taskId: task.id, title: task.title, roomId: task.roomId,
-      roomName: roomById(task.roomId)?.name || 'Sin estancia',
+      roomName: roomById(task.roomId)?.name || 'Sin ubicación',
       assigneeId: task.assigneeId || null, assigneeName: userName(task.assigneeId, task.assigneeName),
       completedAt: updated.completedAt, modifiedAt: updated.completedAt,
     });
@@ -2688,7 +2702,7 @@ async function checkReminders({ force = false } = {}) {
     // Evita avisos individuales obsoletos: un recordatorio exacto solo se muestra
     // hasta una hora después de la hora de vencimiento.
     if (!log[key] && now >= remindTs && now <= dueTs + 3600000) {
-      const room = roomById(task.roomId)?.name || 'Sin estancia';
+      const room = roomById(task.roomId)?.name || 'Sin ubicación';
       const person = userName(task.assigneeId, task.assigneeName);
       const lead = reminderMinutes === 0 ? 'Ahora' : reminderText(task);
       const shown = await showSystemNotification(task.title, {
