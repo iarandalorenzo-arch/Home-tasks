@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '5.1.0';
+const APP_VERSION = '6.0.0';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -130,6 +130,33 @@ function recurrenceText(item) {
   return recurrenceLabels[type] || recurrenceLabels.none;
 }
 
+
+function templateById(id) {
+  return state.templates.find(template => template.id === id);
+}
+
+function isWaitingTask(task, now = Date.now()) {
+  return !task?.completed && Number(task?.availableAt || 0) > now;
+}
+
+function availabilityText(task) {
+  const ts = Number(task?.availableAt || 0);
+  if (!ts) return '';
+  const date = new Date(ts);
+  const sameDay = localISO(date) === todayISO();
+  return sameDay
+    ? `Disponible a las ${new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' }).format(date)}`
+    : `Disponible ${new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(date)}`;
+}
+
+function chainDelayText(minutes) {
+  const value = Math.max(0, Number(minutes) || 0);
+  if (!value) return 'inmediatamente';
+  if (value % 1440 === 0) return `${value / 1440} día${value === 1440 ? '' : 's'} después`;
+  if (value % 60 === 0) return `${value / 60} h después`;
+  return `${value} min después`;
+}
+
 function addMonthsClamped(date, months = 1) {
   const result = new Date(date);
   const day = result.getDate();
@@ -194,13 +221,13 @@ function cacheElements() {
   [
     'connectionBadge','syncHeaderBadge','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
     'roomFilter','statusFilter','assigneeFilter','taskSearch','taskList','activeRoomHint','newTaskButton',
-    'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayDashboardPending','todayDashboardOverdue','todayDashboardDone','todayDashboardUnassigned','todayTaskList','todayOverdueList','todayNoDateList','todayTomorrowList','todayRecentHistory',
+    'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayDashboardPending','todayDashboardOverdue','todayDashboardDone','todayDashboardUnassigned','todayTaskList','todayOverdueList','todayNoDateList','todayTomorrowList','todayWaitingList','todayRecentHistory',
     'historyUserFilter','historyRoomFilter','historyList',
     'routineRoomFilter','routineSearch','routineList','newRoutineButton','templateCount','activeRoutineCount',
     'planPrevWeek','planTodayWeek','planNextWeek','planWeekLabel','planAssigneeFilter','weeklyPlanner','planBacklog','workloadSummary',
     'houseNameInput','saveHouseNameButton','addUserForm','newUserName','userList','roomSettingsList','saveRoomNamesButton',
-    'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','saveTaskButton','closeDialogButton','cancelDialogButton',
-    'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
+    'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','taskNextTemplate','taskNextDelay','taskNextDelayWrap','saveTaskButton','closeDialogButton','cancelDialogButton',
+    'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','routineNextTemplate','routineNextDelay','routineNextDelayWrap','routineAutoGenerate','routineNextRunDate','routineNextRunDateWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
     'resetButton','themeButton','toast','offlineReady','installButton','installHelp','forceAppUpdateButton','appVersionDisplay','lastForcedUpdate','syncSettingsCard',
     'syncStateSummary','syncStatusPill','syncEndpoint','syncHouseKey','generateSyncKeyButton','saveSyncConfigButton','testSyncButton','syncConnectedPanel','syncCloudStatus','syncLastSync','syncLastAttempt','syncLastResult','syncDeviceId','createCloudButton','adoptCloudButton','syncNowButton','unlinkCloudButton','autoSyncToggle','syncHelpText','syncProgress','syncProgressBar','syncProgressLabel','syncProgressPercent','syncProgressDetail','exportBackupButton','importBackupButton','importBackupFile'
   ].forEach(id => { els[id] = document.getElementById(id); });
@@ -232,11 +259,11 @@ function userName(id, fallback = 'Sin asignar') {
 }
 
 function isOverdue(task) {
-  return !task.completed && task.dueDate && task.dueDate < todayISO();
+  return !task.completed && !isWaitingTask(task) && task.dueDate && task.dueDate < todayISO();
 }
 
 function roomStats(roomId) {
-  const pending = state.tasks.filter(task => task.roomId === roomId && !task.completed);
+  const pending = state.tasks.filter(task => task.roomId === roomId && !task.completed && !isWaitingTask(task));
   return { count: pending.length, overdue: pending.some(isOverdue) };
 }
 
@@ -358,6 +385,27 @@ async function ensureV41Data() {
   await put('settings', { id: 'appVersion', value: APP_VERSION });
 }
 
+
+async function ensureV6Data() {
+  const settings = await getAll('settings');
+  if (!settings.some(item => item.id === 'v6-initialized' && item.value === true)) {
+    const templates = await getAll('templates');
+    const dishwasher = templates.find(item => item.id === 'tpl-kitchen-dishwasher-start');
+    if (dishwasher && !dishwasher.nextTemplateId) {
+      await put('templates', {
+        ...dishwasher,
+        nextTemplateId: 'tpl-kitchen-dishwasher-empty',
+        nextDelayMinutes: 120,
+        modifiedAt: Date.now(),
+      });
+      localStorage.setItem(LS_CLOUD_DIRTY, '1');
+      bumpLocalRevision();
+    }
+    await put('settings', { id: 'v6-initialized', value: true });
+  }
+  await put('settings', { id: 'appVersion', value: APP_VERSION });
+}
+
 async function loadState() {
   [state.rooms, state.users, state.tasks, state.history, state.settings, state.templates] = await Promise.all([
     getAll('rooms'), getAll('users'), getAll('tasks'), getAll('history'), getAll('settings'), getAll('templates')
@@ -374,11 +422,61 @@ async function loadState() {
 
   state.rooms.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
   state.users.sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  state.tasks = state.tasks.map(task => ({ recurrence: 'none', recurrenceDays: null, ...task }));
+  state.tasks = state.tasks.map(task => ({ recurrence: 'none', recurrenceDays: null, nextTemplateId: null, nextDelayMinutes: 0, availableAt: null, ...task }));
   state.tasks.sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999') || b.createdAt - a.createdAt);
   state.history.sort((a, b) => b.completedAt - a.completedAt);
-  state.templates = state.templates.map(template => ({ recurrence: 'none', recurrenceDays: null, priority: 'normal', assigneeId: null, ...template }));
+  state.templates = state.templates.map(template => ({ recurrence: 'none', recurrenceDays: null, priority: 'normal', assigneeId: null, nextTemplateId: null, nextDelayMinutes: 0, autoGenerate: false, nextRunDate: '', ...template }));
   state.templates.sort((a, b) => (roomById(a.roomId)?.order ?? 999) - (roomById(b.roomId)?.order ?? 999) || a.title.localeCompare(b.title, 'es'));
+}
+
+
+async function materializeAutoRoutines() {
+  const today = todayISO();
+  let changed = false;
+  for (let i = 0; i < state.templates.length; i++) {
+    const template = state.templates[i];
+    if (!template.autoGenerate || !template.recurrence || template.recurrence === 'none') continue;
+    const runDate = template.nextRunDate || today;
+    if (runDate > today) continue;
+
+    const taskId = `auto:${template.id}:${runDate}`;
+    if (!state.tasks.some(task => task.id === taskId)) {
+      const task = {
+        id: taskId,
+        templateId: template.id,
+        title: template.title,
+        roomId: template.roomId,
+        assigneeId: template.assigneeId || null,
+        assigneeName: template.assigneeId ? userName(template.assigneeId, '') : undefined,
+        dueDate: runDate,
+        priority: template.priority || 'normal',
+        recurrence: 'none', recurrenceDays: null,
+        nextTemplateId: template.nextTemplateId || null,
+        nextDelayMinutes: Number(template.nextDelayMinutes || 0),
+        completed: false,
+        createdAt: Date.now(), modifiedAt: Date.now(),
+        autoGenerated: true,
+      };
+      await put('tasks', task);
+      state.tasks.push(task);
+      changed = true;
+    }
+
+    const nextRunDate = nextRecurrenceDate({ ...template, dueDate: runDate });
+    const updatedTemplate = { ...template, nextRunDate, modifiedAt: Date.now() };
+    await put('templates', updatedTemplate);
+    state.templates[i] = updatedTemplate;
+    changed = true;
+  }
+
+  if (changed) {
+    state.tasks.sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999') || (b.createdAt || 0) - (a.createdAt || 0));
+    state.templates.sort((a, b) => (roomById(a.roomId)?.order ?? 999) - (roomById(b.roomId)?.order ?? 999) || a.title.localeCompare(b.title, 'es'));
+    localStorage.setItem(LS_CLOUD_DIRTY, '1');
+    bumpLocalRevision();
+    scheduleSyncSoon(2500);
+  }
+  return changed;
 }
 
 function renderShape(layout, extraClass = '') {
@@ -464,14 +562,17 @@ function renderFilters() {
   const selectedHistoryUser = els.historyUserFilter.value || 'all';
   const selectedTaskRoom = els.taskRoom.value;
   const selectedTaskAssignee = els.taskAssignee.value;
+  const selectedTaskNextTemplate = els.taskNextTemplate?.value || ''; 
   const selectedRoutineRoomFilter = els.routineRoomFilter.value || 'all';
   const selectedRoutineRoom = els.routineRoom.value;
   const selectedRoutineAssignee = els.routineAssignee.value;
+  const selectedRoutineNextTemplate = els.routineNextTemplate?.value || ''; 
   const selectedPlanAssignee = els.planAssigneeFilter.value || 'all';
   const selectedTodayAssignee = localStorage.getItem(LS_TODAY_ASSIGNEE) || els.todayAssigneeFilter?.value || 'all';
 
   const roomOptions = optionMarkup(normalizeRooms(state.rooms), room => room.id, room => room.name);
   const userOptions = optionMarkup(state.users, user => user.id, user => user.name);
+  const templateOptions = optionMarkup(state.templates, template => template.id, template => `${roomById(template.roomId)?.name || 'Sin estancia'} · ${template.title}`);
 
   els.roomFilter.innerHTML = `<option value="all">Todas</option>${roomOptions}`;
   els.historyRoomFilter.innerHTML = `<option value="all">Todas</option>${roomOptions}`;
@@ -485,6 +586,8 @@ function renderFilters() {
   els.historyUserFilter.innerHTML = `<option value="all">Todas</option><option value="unassigned">Sin asignar</option>${userOptions}`;
   els.taskAssignee.innerHTML = `<option value="">Sin asignar</option>${userOptions}`;
   els.routineAssignee.innerHTML = `<option value="">Sin asignar</option>${userOptions}`;
+  if (els.taskNextTemplate) els.taskNextTemplate.innerHTML = `<option value="">Ninguna</option>${templateOptions}`;
+  if (els.routineNextTemplate) els.routineNextTemplate.innerHTML = `<option value="">Ninguna</option>${templateOptions}`;
 
   setSelectValueIfPresent(els.roomFilter, selectedRoom);
   setSelectValueIfPresent(els.assigneeFilter, selectedAssignee);
@@ -495,6 +598,8 @@ function renderFilters() {
   setSelectValueIfPresent(els.routineRoomFilter, selectedRoutineRoomFilter);
   setSelectValueIfPresent(els.routineRoom, selectedRoutineRoom);
   setSelectValueIfPresent(els.routineAssignee, selectedRoutineAssignee);
+  if (els.taskNextTemplate) setSelectValueIfPresent(els.taskNextTemplate, selectedTaskNextTemplate);
+  if (els.routineNextTemplate) setSelectValueIfPresent(els.routineNextTemplate, selectedRoutineNextTemplate);
   setSelectValueIfPresent(els.planAssigneeFilter, selectedPlanAssignee);
   if (els.todayAssigneeFilter) setSelectValueIfPresent(els.todayAssigneeFilter, selectedTodayAssignee);
 }
@@ -513,7 +618,7 @@ function formatDate(dateString) {
 }
 
 function renderSummary() {
-  const pending = state.tasks.filter(task => !task.completed);
+  const pending = state.tasks.filter(task => !task.completed && !isWaitingTask(task));
   const overdue = pending.filter(isOverdue);
   const today = pending.filter(task => task.dueDate === todayISO());
   const completedToday = state.history.filter(item => localISO(new Date(item.completedAt)) === todayISO());
@@ -559,31 +664,37 @@ function todayAssigneeOptions(task) {
 function todayTaskMarkup(task, { showDate = false, compact = false } = {}) {
   const room = roomById(task.roomId)?.name || 'Sin estancia';
   const person = userName(task.assigneeId, task.assigneeName);
+  const waiting = isWaitingTask(task);
   const datePart = showDate ? `<span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}</span>` : '';
-  const canMoveTomorrow = task.dueDate !== addDaysISO(1);
-  return `<div class="today-task-row ${task.priority === 'high' ? 'high' : ''}${compact ? ' compact' : ''}" data-task-id="${task.id}">
-    <button class="today-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}" title="Completar">✓</button>
+  const nextTemplate = task.nextTemplateId ? templateById(task.nextTemplateId) : null;
+  return `<div class="today-task-row ${task.priority === 'high' ? 'high' : ''}${compact ? ' compact' : ''}${waiting ? ' waiting' : ''}" data-task-id="${task.id}">
+    <button class="today-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}" title="${waiting ? availabilityText(task) : 'Completar'}" ${waiting ? 'disabled' : ''}>${waiting ? '⏳' : '✓'}</button>
     <button class="today-task-open" type="button" title="Editar tarea">
       <span class="today-task-title-line"><strong>${escapeHTML(task.title)}</strong><i class="today-person-avatar" title="${escapeHTML(person)}">${escapeHTML(todayPersonInitial(task))}</i></span>
-      <span>${escapeHTML(room)} · ${escapeHTML(person)}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}</span>
+      <span>${escapeHTML(room)} · ${escapeHTML(person)}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}${waiting ? ` · ⏳ ${escapeHTML(availabilityText(task))}` : ''}${nextTemplate ? ` · → ${escapeHTML(nextTemplate.title)}` : ''}</span>
     </button>
     ${datePart}
     <div class="today-task-actions">
-      ${canMoveTomorrow ? '<button class="today-quick-action today-task-tomorrow" type="button" title="Pasar a mañana">Mañana</button>' : ''}
+      ${!waiting ? `<label class="today-quick-postpone-wrap" title="Aplazar"><span class="sr-only">Aplazar</span><select class="today-quick-postpone" aria-label="Aplazar tarea"><option value="">Aplazar</option><option value="1">Mañana</option><option value="2">+2 días</option><option value="7">+1 semana</option><option value="none">Sin fecha</option></select></label>` : ''}
       <label class="today-quick-assignee-wrap" title="Reasignar"><span class="sr-only">Responsable</span><select class="today-quick-assignee" aria-label="Reasignar tarea">${todayAssigneeOptions(task)}</select></label>
       <button class="today-quick-action today-task-edit" type="button" title="Editar">✎</button>
     </div>
   </div>`;
 }
 
-async function postponeTaskToTomorrow(id) {
+async function postponeTask(id, value = '1') {
   const task = state.tasks.find(item => item.id === id);
   if (!task) return;
-  await put('tasks', { ...task, dueDate: addDaysISO(1), modifiedAt: Date.now() });
+  const dueDate = value === 'none' ? '' : addDaysISO(Math.max(1, Number(value) || 1));
+  await put('tasks', { ...task, dueDate, availableAt: null, modifiedAt: Date.now() });
   await loadState();
   renderAll();
-  showToast('Tarea pasada a mañana');
+  showToast(value === 'none' ? 'Tarea dejada sin fecha' : value === '1' ? 'Tarea pasada a mañana' : `Tarea aplazada ${value} días`);
   touchCloudDirty();
+}
+
+async function postponeTaskToTomorrow(id) {
+  return postponeTask(id, '1');
 }
 
 async function quickAssignTask(id, assigneeId) {
@@ -637,7 +748,7 @@ function bindTodayTaskEvents(root) {
     });
     row.querySelector('.today-task-open')?.addEventListener('click', () => openTaskDialog(id));
     row.querySelector('.today-task-edit')?.addEventListener('click', () => openTaskDialog(id));
-    row.querySelector('.today-task-tomorrow')?.addEventListener('click', () => postponeTaskToTomorrow(id));
+    row.querySelector('.today-quick-postpone')?.addEventListener('change', event => { if (event.target.value) postponeTask(id, event.target.value); });
     row.querySelector('.today-quick-assignee')?.addEventListener('change', event => quickAssignTask(id, event.target.value));
     bindTodaySwipe(row, id);
   });
@@ -648,7 +759,9 @@ function renderToday() {
   const selected = els.todayAssigneeFilter?.value || 'all';
   const today = todayISO();
   const tomorrow = addDaysISO(1);
-  const pending = state.tasks.filter(task => !task.completed && todayMatchesAssignee(task, selected));
+  const pendingAll = state.tasks.filter(task => !task.completed && todayMatchesAssignee(task, selected));
+  const waitingTasks = pendingAll.filter(task => isWaitingTask(task)).sort((a, b) => Number(a.availableAt || 0) - Number(b.availableAt || 0));
+  const pending = pendingAll.filter(task => !isWaitingTask(task));
   const byPriorityThenCreated = (a, b) => (a.priority === b.priority ? 0 : a.priority === 'high' ? -1 : 1) || (a.createdAt || 0) - (b.createdAt || 0);
   const dueToday = pending.filter(task => task.dueDate === today).sort(byPriorityThenCreated);
   const overdue = pending.filter(task => task.dueDate && task.dueDate < today).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || byPriorityThenCreated(a, b));
@@ -673,6 +786,7 @@ function renderToday() {
   renderList(els.todayTaskList, dueToday, 'No hay tareas pendientes para hoy.');
   renderList(els.todayNoDateList, noDate.slice(0, 10), 'No hay tareas sin fecha.');
   renderList(els.todayTomorrowList, tomorrowTasks.slice(0, 6), 'No hay tareas previstas para mañana.', { compact: true });
+  renderList(els.todayWaitingList, waitingTasks.slice(0, 8), 'No hay tareas encadenadas en espera.', { showDate: true });
 
   const recent = [...state.history]
     .filter(item => selected === 'all' || (selected === 'unassigned' ? !item.assigneeId : item.assigneeId === selected))
@@ -729,8 +843,10 @@ function renderTasks() {
   els.taskList.innerHTML = tasks.map(task => {
     const room = roomById(task.roomId)?.name || 'Sin estancia';
     const person = userName(task.assigneeId, task.assigneeName);
-    return `<article class="task-item ${task.completed ? 'completed' : ''}" data-task-id="${task.id}">
-      <button class="task-check" type="button" aria-label="${task.completed ? 'Reabrir' : 'Completar'} ${escapeHTML(task.title)}">${task.completed ? '✓' : ''}</button>
+    const nextTemplate = task.nextTemplateId ? templateById(task.nextTemplateId) : null;
+    const waiting = isWaitingTask(task);
+    return `<article class="task-item ${task.completed ? 'completed' : ''}${waiting ? ' waiting' : ''}" data-task-id="${task.id}">
+      <button class="task-check" type="button" aria-label="${task.completed ? 'Reabrir' : 'Completar'} ${escapeHTML(task.title)}" ${waiting ? 'disabled' : ''}>${task.completed ? '✓' : waiting ? '⏳' : ''}</button>
       <div class="task-main">
         <div class="task-title-row"><span class="task-title">${escapeHTML(task.title)}</span>${task.priority === 'high' ? '<i class="priority-dot" title="Prioridad alta"></i>' : ''}</div>
         <div class="task-meta">
@@ -738,9 +854,12 @@ function renderTasks() {
           <span>${escapeHTML(person)}</span>
           <span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}</span>
           ${(task.recurrence && task.recurrence !== 'none') ? `<span class="recurrence-badge">↻ ${escapeHTML(recurrenceText(task))}</span>` : ''}
+          ${waiting ? `<span class="waiting-badge">⏳ ${escapeHTML(availabilityText(task))}</span>` : ''}
+          ${nextTemplate ? `<span class="chain-badge">→ ${escapeHTML(nextTemplate.title)}</span>` : ''}
         </div>
       </div>
       <div class="task-actions">
+        ${!task.completed ? `<select class="task-postpone" aria-label="Aplazar tarea"><option value="">Aplazar</option><option value="1">+1d</option><option value="2">+2d</option><option value="7">+7d</option><option value="none">Sin fecha</option></select>` : ''}
         <button class="task-action edit" type="button" aria-label="Editar tarea" title="Editar">✎</button>
         <button class="task-action delete" type="button" aria-label="Eliminar tarea" title="Eliminar">×</button>
       </div>
@@ -749,9 +868,10 @@ function renderTasks() {
 
   els.taskList.querySelectorAll('.task-item').forEach(item => {
     const id = item.dataset.taskId;
-    item.querySelector('.task-check').addEventListener('click', () => toggleTask(id));
-    item.querySelector('.edit').addEventListener('click', () => openTaskDialog(id));
-    item.querySelector('.delete').addEventListener('click', () => deleteTask(id));
+    item.querySelector('.task-check')?.addEventListener('click', () => toggleTask(id));
+    item.querySelector('.edit')?.addEventListener('click', () => openTaskDialog(id));
+    item.querySelector('.task-postpone')?.addEventListener('change', event => { if (event.target.value) postponeTask(id, event.target.value); });
+    item.querySelector('.delete')?.addEventListener('click', () => deleteTask(id));
   });
 }
 
@@ -832,7 +952,7 @@ function renderRoutines() {
     return `<article class="routine-card" data-template-id="${template.id}">
       <div class="routine-main">
         <div class="routine-title-row"><strong>${escapeHTML(template.title)}</strong>${template.priority === 'high' ? '<i class="priority-dot" title="Prioridad alta"></i>' : ''}</div>
-        <div class="task-meta"><span>${escapeHTML(room)}</span><span>${escapeHTML(person)}</span><span class="recurrence-badge">${template.recurrence && template.recurrence !== 'none' ? '↻ ' : ''}${escapeHTML(recurrenceText(template))}</span></div>
+        <div class="task-meta"><span>${escapeHTML(room)}</span><span>${escapeHTML(person)}</span><span class="recurrence-badge">${template.recurrence && template.recurrence !== 'none' ? '↻ ' : ''}${escapeHTML(recurrenceText(template))}</span>${template.autoGenerate ? `<span class="auto-badge">⚡ Auto · ${escapeHTML(formatDate(template.nextRunDate || todayISO()))}</span>` : ''}${template.nextTemplateId && templateById(template.nextTemplateId) ? `<span class="chain-badge">→ ${escapeHTML(templateById(template.nextTemplateId).title)}</span>` : ''}</div>
       </div>
       <div class="routine-actions">
         <button class="secondary-button routine-create" type="button">Crear hoy</button>
@@ -852,6 +972,9 @@ function renderRoutines() {
 function updateCustomRecurrenceVisibility() {
   els.taskRecurrenceDaysWrap.hidden = els.taskRecurrence.value !== 'custom';
   els.routineRecurrenceDaysWrap.hidden = els.routineRecurrence.value !== 'custom';
+  if (els.taskNextDelayWrap) els.taskNextDelayWrap.hidden = !els.taskNextTemplate.value;
+  if (els.routineNextDelayWrap) els.routineNextDelayWrap.hidden = !els.routineNextTemplate.value;
+  if (els.routineNextRunDateWrap) els.routineNextRunDateWrap.hidden = !els.routineAutoGenerate.checked;
 }
 
 function openRoutineDialog(templateId = null) {
@@ -867,6 +990,10 @@ function openRoutineDialog(templateId = null) {
     els.routinePriority.value = template.priority || 'normal';
     els.routineRecurrence.value = template.recurrence || 'none';
     els.routineRecurrenceDays.value = template.recurrenceDays || 2;
+    els.routineNextTemplate.value = template.nextTemplateId || '';
+    els.routineNextDelay.value = String(Number(template.nextDelayMinutes || 0));
+    els.routineAutoGenerate.checked = !!template.autoGenerate;
+    els.routineNextRunDate.value = template.nextRunDate || todayISO();
   } else {
     els.routineDialogEyebrow.textContent = 'Plantilla doméstica';
     els.routineDialogTitle.textContent = 'Nueva rutina';
@@ -875,6 +1002,10 @@ function openRoutineDialog(templateId = null) {
     els.routineRecurrence.value = 'weekly';
     els.routineRecurrenceDays.value = 2;
     els.routineAssignee.value = '';
+    els.routineNextTemplate.value = '';
+    els.routineNextDelay.value = '0';
+    els.routineAutoGenerate.checked = false;
+    els.routineNextRunDate.value = todayISO();
     if (els.routineRoomFilter.value !== 'all') els.routineRoom.value = els.routineRoomFilter.value;
   }
   updateCustomRecurrenceVisibility();
@@ -887,6 +1018,8 @@ async function saveRoutine(event) {
   const title = els.routineTitle.value.trim();
   if (!title) return;
   const existing = state.editingRoutineId ? state.templates.find(item => item.id === state.editingRoutineId) : null;
+  if (els.routineAutoGenerate.checked && els.routineRecurrence.value === 'none') { showToast('La generación automática necesita una repetición'); return; }
+  if (existing && els.routineNextTemplate.value === existing.id) { showToast('Una rutina no puede encadenarse consigo misma'); return; }
   const template = {
     ...(existing || {}),
     id: existing?.id || makeId(),
@@ -896,6 +1029,10 @@ async function saveRoutine(event) {
     priority: els.routinePriority.value,
     recurrence: els.routineRecurrence.value,
     recurrenceDays: els.routineRecurrence.value === 'custom' ? Math.max(2, Number(els.routineRecurrenceDays.value) || 2) : null,
+    nextTemplateId: els.routineNextTemplate.value || null,
+    nextDelayMinutes: els.routineNextTemplate.value ? Math.max(0, Number(els.routineNextDelay.value) || 0) : 0,
+    autoGenerate: !!els.routineAutoGenerate.checked,
+    nextRunDate: els.routineAutoGenerate.checked ? (els.routineNextRunDate.value || todayISO()) : '',
     createdAt: existing?.createdAt || Date.now(),
     modifiedAt: Date.now(),
   };
@@ -937,7 +1074,8 @@ async function createTaskFromTemplate(id) {
     assigneeId: template.assigneeId || null,
     assigneeName: template.assigneeId ? userName(template.assigneeId, '') : undefined,
     dueDate: todayISO(), priority: template.priority || 'normal',
-    recurrence: template.recurrence || 'none', recurrenceDays: template.recurrenceDays || null,
+    recurrence: template.autoGenerate ? 'none' : (template.recurrence || 'none'), recurrenceDays: template.autoGenerate ? null : (template.recurrenceDays || null),
+    nextTemplateId: template.nextTemplateId || null, nextDelayMinutes: Number(template.nextDelayMinutes || 0),
     completed: false, createdAt: Date.now(), modifiedAt: Date.now(),
   });
   await loadState();
@@ -966,12 +1104,13 @@ function formatWeekLabel(start, end) {
 function planTaskMarkup(task) {
   const room = roomById(task.roomId)?.name || 'Sin estancia';
   const person = userName(task.assigneeId, task.assigneeName);
-  return `<div class="plan-task ${task.priority === 'high' ? 'high' : ''}" data-task-id="${task.id}">
-    <button class="plan-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}">✓</button>
+  const waiting = isWaitingTask(task);
+  return `<div class="plan-task ${task.priority === 'high' ? 'high' : ''}${waiting ? ' waiting' : ''}" data-task-id="${task.id}">
+    <button class="plan-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}" ${waiting ? 'disabled' : ''}>${waiting ? '⏳' : '✓'}</button>
     <button class="plan-task-open" type="button" title="Editar tarea">
       <strong>${escapeHTML(task.title)}</strong>
       <span>${escapeHTML(room)}</span>
-      <small>${escapeHTML(person)}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}</small>
+      <small>${escapeHTML(person)}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}${waiting ? ` · ${escapeHTML(availabilityText(task))}` : ''}</small>
     </button>
   </div>`;
 }
@@ -1099,6 +1238,8 @@ function openTaskDialog(taskId = null, presetDate = null) {
     els.taskPriority.value = task.priority || 'normal';
     els.taskRecurrence.value = task.recurrence || 'none';
     els.taskRecurrenceDays.value = task.recurrenceDays || 2;
+    els.taskNextTemplate.value = task.nextTemplateId || '';
+    els.taskNextDelay.value = String(Number(task.nextDelayMinutes || 0));
     updateCustomRecurrenceVisibility();
   } else {
     els.taskDialogEyebrow.textContent = 'Nueva actividad';
@@ -1111,6 +1252,8 @@ function openTaskDialog(taskId = null, presetDate = null) {
     els.taskAssignee.value = todayAssignee !== 'all' && todayAssignee !== 'unassigned' ? todayAssignee : '';
     els.taskRecurrence.value = 'none';
     els.taskRecurrenceDays.value = 2;
+    els.taskNextTemplate.value = '';
+    els.taskNextDelay.value = '0';
     updateCustomRecurrenceVisibility();
     if (els.roomFilter.value !== 'all') els.taskRoom.value = els.roomFilter.value;
   }
@@ -1137,6 +1280,8 @@ async function saveTask(event) {
       priority: els.taskPriority.value,
       recurrence: els.taskRecurrence.value,
       recurrenceDays: els.taskRecurrence.value === 'custom' ? Math.max(2, Number(els.taskRecurrenceDays.value) || 2) : null,
+      nextTemplateId: els.taskNextTemplate.value || null,
+      nextDelayMinutes: els.taskNextTemplate.value ? Math.max(0, Number(els.taskNextDelay.value) || 0) : 0,
       modifiedAt: Date.now(),
     });
     showToast('Tarea actualizada');
@@ -1151,6 +1296,8 @@ async function saveTask(event) {
       priority: els.taskPriority.value,
       recurrence: els.taskRecurrence.value,
       recurrenceDays: els.taskRecurrence.value === 'custom' ? Math.max(2, Number(els.taskRecurrenceDays.value) || 2) : null,
+      nextTemplateId: els.taskNextTemplate.value || null,
+      nextDelayMinutes: els.taskNextTemplate.value ? Math.max(0, Number(els.taskNextDelay.value) || 0) : 0,
       completed: false,
       createdAt: Date.now(),
       modifiedAt: Date.now(),
@@ -1165,6 +1312,41 @@ async function saveTask(event) {
   touchCloudDirty();
 }
 
+async function createChainedTask(task, completedAt) {
+  if (!task?.nextTemplateId) return null;
+  const nextTemplate = templateById(task.nextTemplateId);
+  if (!nextTemplate) return null;
+  const occurrence = task.recurrence && task.recurrence !== 'none' ? (task.dueDate || localISO(new Date(completedAt))) : 'once';
+  const childId = `chain:${task.id}:${occurrence}:${nextTemplate.id}`;
+  const existing = state.tasks.find(item => item.id === childId);
+  if (existing) return existing;
+
+  const delayMinutes = Math.max(0, Number(task.nextDelayMinutes || 0));
+  const availableAt = completedAt + delayMinutes * 60000;
+  const child = {
+    id: childId,
+    templateId: nextTemplate.id,
+    chainParentId: task.id,
+    chainRootId: task.chainRootId || task.id,
+    title: nextTemplate.title,
+    roomId: nextTemplate.roomId,
+    assigneeId: nextTemplate.assigneeId || null,
+    assigneeName: nextTemplate.assigneeId ? userName(nextTemplate.assigneeId, '') : undefined,
+    dueDate: localISO(new Date(availableAt)),
+    availableAt: delayMinutes ? availableAt : null,
+    priority: nextTemplate.priority || 'normal',
+    recurrence: 'none', recurrenceDays: null,
+    nextTemplateId: nextTemplate.nextTemplateId || null,
+    nextDelayMinutes: Number(nextTemplate.nextDelayMinutes || 0),
+    completed: false,
+    createdAt: completedAt,
+    modifiedAt: completedAt,
+  };
+  await remove('sync', `tombstone:tasks:${childId}`);
+  await put('tasks', child);
+  return child;
+}
+
 async function toggleTask(id) {
   const task = state.tasks.find(item => item.id === id);
   if (!task) return;
@@ -1173,6 +1355,7 @@ async function toggleTask(id) {
   if (completing && task.recurrence && task.recurrence !== 'none') {
     const completedAt = Date.now();
     const nextDueDate = nextRecurrenceDate(task);
+    const chainedTask = await createChainedTask(task, completedAt);
     await put('history', {
       id: makeId(), taskId: task.id, title: task.title, roomId: task.roomId,
       roomName: roomById(task.roomId)?.name || 'Sin estancia',
@@ -1182,7 +1365,7 @@ async function toggleTask(id) {
     await put('tasks', { ...task, completed: false, completedAt: null, lastCompletedAt: completedAt, dueDate: nextDueDate, modifiedAt: completedAt });
     await loadState();
     renderAll();
-    showToast(`Completada · próxima ${formatDate(nextDueDate)}`);
+    showToast(chainedTask ? `Completada · ${chainedTask.title} ${chainDelayText(task.nextDelayMinutes)}` : `Completada · próxima ${formatDate(nextDueDate)}`);
     touchCloudDirty();
     return;
   }
@@ -1196,11 +1379,14 @@ async function toggleTask(id) {
       assigneeId: task.assigneeId || null, assigneeName: userName(task.assigneeId, task.assigneeName),
       completedAt: updated.completedAt, modifiedAt: updated.completedAt,
     });
-    showToast('Tarea completada');
+    const chainedTask = await createChainedTask(task, updated.completedAt);
+    showToast(chainedTask ? `Completada · siguiente: ${chainedTask.title}` : 'Tarea completada');
   } else {
     const matchingHistory = state.history.filter(item => item.taskId === task.id && !item.recurring);
     for (const item of matchingHistory) { await markDeleted('history', item.id); await remove('history', item.id); }
-    showToast('Tarea reabierta');
+    const pendingChildren = state.tasks.filter(item => item.chainParentId === task.id && !item.completed);
+    for (const child of pendingChildren) { await markDeleted('tasks', child.id); await remove('tasks', child.id); }
+    showToast(pendingChildren.length ? 'Tarea reabierta · siguiente tarea retirada' : 'Tarea reabierta');
   }
   await loadState();
   renderAll();
@@ -2306,7 +2492,10 @@ function setupEvents() {
   els.cancelDialogButton.addEventListener('click', () => { state.editingTaskId = null; els.taskDialog.close(); });
   els.taskForm.addEventListener('submit', saveTask);
   els.taskRecurrence.addEventListener('change', updateCustomRecurrenceVisibility);
+  els.taskNextTemplate?.addEventListener('change', updateCustomRecurrenceVisibility);
   els.routineRecurrence.addEventListener('change', updateCustomRecurrenceVisibility);
+  els.routineNextTemplate?.addEventListener('change', updateCustomRecurrenceVisibility);
+  els.routineAutoGenerate?.addEventListener('change', updateCustomRecurrenceVisibility);
   els.routineForm.addEventListener('submit', saveRoutine);
   els.closeRoutineDialogButton.addEventListener('click', () => { state.editingRoutineId = null; els.routineDialog.close(); });
   els.cancelRoutineDialogButton.addEventListener('click', () => { state.editingRoutineId = null; els.routineDialog.close(); });
@@ -2342,19 +2531,21 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V5 en este dispositivo?')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V6 en este dispositivo?')) return;
     await resetDatabase();
     await ensureV1Data();
     await ensureV2Data();
     await ensureV3Data();
     await ensureV4Data();
     await ensureV41Data();
+    await ensureV6Data();
     await loadState();
+    await materializeAutoRoutines();
     els.roomFilter.value = 'all';
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V5 restablecida');
+    showToast('V6 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
@@ -2372,9 +2563,12 @@ async function init() {
   await ensureV3Data();
   await ensureV4Data();
   await ensureV41Data();
+  await ensureV6Data();
   await loadState();
+  await materializeAutoRoutines();
   renderAll();
   setupAutoSync();
+  setInterval(() => { if (state.tasks.some(task => isWaitingTask(task))) renderAll(); }, 60000);
   await setupServiceWorker();
 }
 

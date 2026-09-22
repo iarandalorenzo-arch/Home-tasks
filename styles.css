@@ -625,3 +625,24 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
   .today-quick-action { padding:0 6px; }
   .top-actions .status-badge { display:none; }
 }
+
+
+/* V6.0.0 - gestion domestica avanzada */
+.form-section-title { grid-column: 1 / -1; margin-top: 5px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.checkbox-field { display:flex !important; flex-direction:row !important; align-items:flex-start; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:12px; background:var(--surface-2); }
+.checkbox-field input { width:18px; height:18px; margin-top:2px; flex:none; }
+.checkbox-field > span { display:flex; flex-direction:column; gap:2px; }
+.checkbox-field small { color:var(--muted); font-size:10px; line-height:1.35; font-weight:500; }
+.chain-badge, .waiting-badge, .auto-badge { display:inline-flex; align-items:center; min-height:21px; padding:0 7px; border-radius:999px; font-size:9px; font-weight:800; white-space:nowrap; }
+.chain-badge { background:color-mix(in srgb, var(--accent) 13%, transparent); color:var(--accent); }
+.waiting-badge { background:rgba(215,157,44,.13); color:#a56f08; }
+.auto-badge { background:rgba(56,164,103,.13); color:#268452; }
+.task-item.waiting, .today-task-row.waiting, .plan-task.waiting { opacity:.78; }
+.task-item.waiting .task-check, .today-task-row.waiting .today-task-check, .plan-task.waiting .plan-task-check { cursor:not-allowed; }
+.task-postpone { max-width:82px; min-height:30px; padding:0 6px; border:1px solid var(--border); background:var(--surface); color:var(--muted); border-radius:8px; font-size:9px; font-weight:800; }
+.today-quick-postpone-wrap select { min-height:27px; max-width:83px; padding:0 5px; border:1px solid var(--border); background:var(--surface); color:var(--muted); border-radius:8px; font-size:9px; font-weight:800; }
+.waiting-panel { border-style:dashed; }
+@media (max-width: 720px) {
+  .task-postpone { max-width:68px; }
+  .today-quick-postpone-wrap select { max-width:72px; }
+}

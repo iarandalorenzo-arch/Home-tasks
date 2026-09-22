@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V5.1.0</title>
+  <title>HomeTasks V6.0.0</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,7 +19,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V5.1.0 · experiencia diaria</p>
+          <p class="subtitle">V6.0.0 · gestión avanzada</p>
         </div>
       </div>
       <div class="top-actions">
@@ -100,6 +100,12 @@
               <div><h3>Mañana</h3><p>Vista rápida del siguiente día.</p></div>
             </div>
             <div id="todayTomorrowList" class="today-task-list compact"></div>
+          </article>
+          <article class="card today-panel waiting-panel">
+            <div class="card-header compact">
+              <div><h3>En espera</h3><p>Tareas encadenadas que todavía no están disponibles.</p></div>
+            </div>
+            <div id="todayWaitingList" class="today-task-list compact"></div>
           </article>
           <article class="card today-panel">
             <div class="card-header compact">
@@ -393,7 +399,7 @@
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">5.1.0</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">6.0.0</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -465,6 +471,23 @@
           <span>Intervalo en dias</span>
           <input id="taskRecurrenceDays" name="recurrenceDays" type="number" min="2" max="365" value="2" />
         </label>
+        <div class="form-section-title full-width">Tarea encadenada</div>
+        <label class="full-width">
+          <span>Al completar, crear</span>
+          <select id="taskNextTemplate"><option value="">Ninguna</option></select>
+        </label>
+        <label id="taskNextDelayWrap" hidden>
+          <span>Espera antes de activarla</span>
+          <select id="taskNextDelay">
+            <option value="0">Inmediatamente</option>
+            <option value="30">30 minutos</option>
+            <option value="60">1 hora</option>
+            <option value="120">2 horas</option>
+            <option value="240">4 horas</option>
+            <option value="720">12 horas</option>
+            <option value="1440">1 día</option>
+          </select>
+        </label>
       </div>
 
       <div class="dialog-actions">
@@ -517,6 +540,31 @@
         <label id="routineRecurrenceDaysWrap" hidden>
           <span>Intervalo en dias</span>
           <input id="routineRecurrenceDays" type="number" min="2" max="365" value="2" />
+        </label>
+        <div class="form-section-title full-width">Automatización</div>
+        <label class="full-width">
+          <span>Al completar, crear la rutina</span>
+          <select id="routineNextTemplate"><option value="">Ninguna</option></select>
+        </label>
+        <label id="routineNextDelayWrap" hidden>
+          <span>Espera antes de activarla</span>
+          <select id="routineNextDelay">
+            <option value="0">Inmediatamente</option>
+            <option value="30">30 minutos</option>
+            <option value="60">1 hora</option>
+            <option value="120">2 horas</option>
+            <option value="240">4 horas</option>
+            <option value="720">12 horas</option>
+            <option value="1440">1 día</option>
+          </select>
+        </label>
+        <label class="checkbox-field full-width">
+          <input id="routineAutoGenerate" type="checkbox" />
+          <span><strong>Generación automática</strong><small>HomeTasks crea la tarea cuando llegue su fecha, sin tener que pulsar “Crear hoy”.</small></span>
+        </label>
+        <label id="routineNextRunDateWrap" hidden>
+          <span>Próxima generación</span>
+          <input id="routineNextRunDate" type="date" />
         </label>
       </div>
       <div class="dialog-actions">
