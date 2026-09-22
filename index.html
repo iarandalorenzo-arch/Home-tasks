@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V7.0.0</title>
+  <title>HomeTasks V8.0.0</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,7 +19,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V7.0.0 · reparto y estadísticas</p>
+          <p class="subtitle">V8.0.0 · recordatorios y avisos</p>
         </div>
       </div>
       <div class="top-actions">
@@ -327,7 +327,7 @@
               </div>
             </label>
             <div class="setting-row"><span>Estancias</span><strong>10</strong></div>
-            <div class="setting-row"><span>Plano</span><strong>Integrado V7</strong></div>
+            <div class="setting-row"><span>Plano</span><strong>Integrado V8</strong></div>
           </article>
 
           <article class="card settings-card users-card">
@@ -356,18 +356,50 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V7</h3>
+            <h3>Estado de V8</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Version</span><strong>7.0.0</strong></div>
+            <div class="setting-row"><span>Version</span><strong>8.0.0</strong></div>
+          </article>
+
+          <article id="notificationSettingsCard" class="card settings-card notification-card">
+            <div class="settings-title-row">
+              <div>
+                <h3>Recordatorios</h3>
+                <p>Avisos locales del dispositivo. No usan Firebase ni ningún servicio push externo.</p>
+              </div>
+              <span id="notificationStatusPill" class="sync-pill">Comprobando</span>
+            </div>
+            <div class="setting-row"><span>Permiso del sistema</span><strong id="notificationPermissionStatus">—</strong></div>
+            <div class="sync-actions">
+              <button id="requestNotificationPermissionButton" class="primary-button" type="button">Activar notificaciones</button>
+              <button id="testNotificationButton" class="secondary-button" type="button">Enviar prueba</button>
+            </div>
+            <label class="switch-row">
+              <input id="notificationsEnabledToggle" type="checkbox" />
+              <span>Activar recordatorios en este dispositivo</span>
+            </label>
+            <label class="switch-row">
+              <input id="dailySummaryToggle" type="checkbox" />
+              <span>Resumen diario de tareas</span>
+            </label>
+            <label class="full-setting-field notification-time-field">
+              <span>Hora del resumen diario</span>
+              <input id="dailySummaryTime" type="time" value="08:00" />
+            </label>
+            <label class="switch-row">
+              <input id="overdueNotificationToggle" type="checkbox" />
+              <span>Avisar de tareas vencidas al abrir o volver a HomeTasks</span>
+            </label>
+            <p id="notificationHelpText" class="setting-help">Los avisos exactos se comprueban mientras HomeTasks está abierta y al volver a primer plano. Sin un servicio push externo, Android no garantiza temporizadores exactos con la PWA completamente cerrada.</p>
           </article>
 
           <article id="syncSettingsCard" class="card settings-card sync-card">
             <div class="settings-title-row">
               <div>
                 <h3>Sincronización</h3>
-                <p>Proveedor desacoplado: Google Apps Script transporta los cambios y Google Drive conserva el archivo de la casa. La sincronización robusta de V4.2 se mantiene sin cambios en V7.</p>
+                <p>Proveedor desacoplado: Google Apps Script transporta los cambios y Google Drive conserva el archivo de la casa. La sincronización robusta de V4.2 se mantiene sin cambios en V8.</p>
               </div>
               <span id="syncStatusPill" class="sync-pill">Sin configurar</span>
             </div>
@@ -439,14 +471,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V7. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V5</button>
+            <p>Restablece HomeTasks a los datos iniciales de V8. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V8</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">7.0.0</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">8.0.0</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -496,6 +528,22 @@
         <label>
           <span>Fecha</span>
           <input id="taskDueDate" name="dueDate" type="date" />
+        </label>
+        <label>
+          <span>Hora (opcional)</span>
+          <input id="taskDueTime" name="dueTime" type="time" />
+        </label>
+        <label>
+          <span>Recordatorio</span>
+          <select id="taskReminderMinutes" name="reminderMinutes">
+            <option value="">Sin recordatorio</option>
+            <option value="0">A la hora de la tarea</option>
+            <option value="15">15 min antes</option>
+            <option value="30">30 min antes</option>
+            <option value="60">1 hora antes</option>
+            <option value="120">2 horas antes</option>
+            <option value="1440">1 día antes</option>
+          </select>
         </label>
         <label>
           <span>Prioridad</span>
@@ -572,6 +620,22 @@
           <select id="routinePriority">
             <option value="normal">Normal</option>
             <option value="high">Alta</option>
+          </select>
+        </label>
+        <label>
+          <span>Hora habitual (opcional)</span>
+          <input id="routineDueTime" type="time" />
+        </label>
+        <label>
+          <span>Recordatorio al crear</span>
+          <select id="routineReminderMinutes">
+            <option value="">Sin recordatorio</option>
+            <option value="0">A la hora de la tarea</option>
+            <option value="15">15 min antes</option>
+            <option value="30">30 min antes</option>
+            <option value="60">1 hora antes</option>
+            <option value="120">2 horas antes</option>
+            <option value="1440">1 día antes</option>
           </select>
         </label>
         <label>

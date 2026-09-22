@@ -1,7 +1,7 @@
 {
   "name": "HomeTasks",
   "short_name": "HomeTasks",
-  "description": "Gestor domestico ligero, offline-first y con planificación semanal",
+  "description": "Gestor doméstico ligero, offline-first, multi-dispositivo y con recordatorios",
   "id": "./",
   "start_url": "./",
   "scope": "./",

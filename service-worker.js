@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hometasks-v7-700';
+const CACHE_NAME = 'hometasks-v8-800';
 const APP_SHELL = [
   './',
   './index.html',
@@ -54,5 +54,22 @@ self.addEventListener('fetch', event => {
       caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
       return response;
     }))
+  );
+});
+
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const target = event.notification?.data?.url || './';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+      for (const client of windowClients) {
+        if ('focus' in client) {
+          client.navigate(target).catch(() => {});
+          return client.focus();
+        }
+      }
+      return clients.openWindow ? clients.openWindow(target) : undefined;
+    })
   );
 });

@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '7.0.0';
+const APP_VERSION = '8.0.0';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -15,6 +15,11 @@ const LS_LAST_SYNC_RESULT = 'hometasks-sync-last-result';
 const LS_LOCAL_REVISION = 'hometasks-local-revision';
 const LS_TODAY_ASSIGNEE = 'hometasks-today-assignee';
 const LS_STATS_PERIOD = 'hometasks-stats-period';
+const LS_NOTIFICATIONS_ENABLED = 'hometasks-notifications-enabled';
+const LS_DAILY_SUMMARY_ENABLED = 'hometasks-daily-summary-enabled';
+const LS_DAILY_SUMMARY_TIME = 'hometasks-daily-summary-time';
+const LS_OVERDUE_NOTIFICATIONS = 'hometasks-overdue-notifications';
+const LS_NOTIFICATION_LOG = 'hometasks-notification-log';
 
 
 const makeId = () => (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
@@ -34,6 +39,34 @@ const addDaysISO = (days) => {
   d.setDate(d.getDate() + days);
   return localISO(d);
 };
+
+const localTimeHHMM = (date = new Date()) => `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+
+function taskDueTimestamp(task) {
+  if (!task?.dueDate || !task?.dueTime) return null;
+  const value = new Date(`${task.dueDate}T${task.dueTime}:00`);
+  const ts = value.getTime();
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function parseReminderMinutes(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function taskTimeText(task) {
+  return task?.dueTime ? task.dueTime : '';
+}
+
+function reminderText(item) {
+  const minutes = parseReminderMinutes(item?.reminderMinutes);
+  if (minutes === null || !item?.dueTime) return '';
+  if (minutes === 0) return 'A la hora';
+  if (minutes === 1440) return '1 día antes';
+  if (minutes % 60 === 0) return `${minutes / 60} h antes`;
+  return `${minutes} min antes`;
+}
 
 
 const isoDate = value => new Date(`${value}T12:00:00`);
@@ -213,6 +246,7 @@ const state = {
   syncProgress: { visible: false, active: false, percent: 0, label: '', detail: '', state: 'idle' },
   syncProgressHideTimer: null,
   syncError: '',
+  reminderTimer: null,
   installPrompt: null,
 };
 
@@ -227,9 +261,10 @@ function cacheElements() {
     'routineRoomFilter','routineSearch','routineList','newRoutineButton','templateCount','activeRoutineCount',
     'planPrevWeek','planTodayWeek','planNextWeek','planWeekLabel','planAssigneeFilter','weeklyPlanner','planBacklog','workloadSummary',
     'houseNameInput','saveHouseNameButton','addUserForm','newUserName','userList','roomSettingsList','saveRoomNamesButton',
-    'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','taskNextTemplate','taskNextDelay','taskNextDelayWrap','saveTaskButton','closeDialogButton','cancelDialogButton',
-    'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','routineNextTemplate','routineNextDelay','routineNextDelayWrap','routineAutoGenerate','routineNextRunDate','routineNextRunDateWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
+    'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskDueTime','taskReminderMinutes','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','taskNextTemplate','taskNextDelay','taskNextDelayWrap','saveTaskButton','closeDialogButton','cancelDialogButton',
+    'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineDueTime','routineReminderMinutes','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','routineNextTemplate','routineNextDelay','routineNextDelayWrap','routineAutoGenerate','routineNextRunDate','routineNextRunDateWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
     'resetButton','themeButton','toast','offlineReady','installButton','installHelp','forceAppUpdateButton','appVersionDisplay','lastForcedUpdate','syncSettingsCard',
+    'notificationSettingsCard','notificationStatusPill','notificationPermissionStatus','requestNotificationPermissionButton','testNotificationButton','notificationsEnabledToggle','dailySummaryToggle','dailySummaryTime','overdueNotificationToggle','notificationHelpText',
     'syncStateSummary','syncStatusPill','syncEndpoint','syncHouseKey','generateSyncKeyButton','saveSyncConfigButton','testSyncButton','syncConnectedPanel','syncCloudStatus','syncLastSync','syncLastAttempt','syncLastResult','syncDeviceId','createCloudButton','adoptCloudButton','syncNowButton','unlinkCloudButton','autoSyncToggle','syncHelpText','syncProgress','syncProgressBar','syncProgressLabel','syncProgressPercent','syncProgressDetail','exportBackupButton','importBackupButton','importBackupFile'
   ].forEach(id => { els[id] = document.getElementById(id); });
 }
@@ -260,7 +295,12 @@ function userName(id, fallback = 'Sin asignar') {
 }
 
 function isOverdue(task) {
-  return !task.completed && !isWaitingTask(task) && task.dueDate && task.dueDate < todayISO();
+  if (!task || task.completed || isWaitingTask(task) || !task.dueDate) return false;
+  const today = todayISO();
+  if (task.dueDate < today) return true;
+  if (task.dueDate > today || !task.dueTime) return false;
+  const dueTs = taskDueTimestamp(task);
+  return !!dueTs && dueTs < Date.now();
 }
 
 function roomStats(roomId) {
@@ -426,6 +466,14 @@ async function ensureV6Data() {
   await put('settings', { id: 'appVersion', value: APP_VERSION });
 }
 
+async function ensureV8Data() {
+  const settings = await getAll('settings');
+  if (!settings.some(item => item.id === 'v8-initialized' && item.value === true)) {
+    await put('settings', { id: 'v8-initialized', value: true });
+  }
+  await put('settings', { id: 'appVersion', value: APP_VERSION });
+}
+
 async function loadState() {
   [state.rooms, state.users, state.tasks, state.history, state.settings, state.templates] = await Promise.all([
     getAll('rooms'), getAll('users'), getAll('tasks'), getAll('history'), getAll('settings'), getAll('templates')
@@ -442,10 +490,10 @@ async function loadState() {
 
   state.rooms.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
   state.users.sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  state.tasks = state.tasks.map(task => ({ recurrence: 'none', recurrenceDays: null, nextTemplateId: null, nextDelayMinutes: 0, availableAt: null, ...task }));
+  state.tasks = state.tasks.map(task => ({ recurrence: 'none', recurrenceDays: null, nextTemplateId: null, nextDelayMinutes: 0, availableAt: null, dueTime: '', reminderMinutes: null, ...task }));
   state.tasks.sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999') || b.createdAt - a.createdAt);
   state.history.sort((a, b) => b.completedAt - a.completedAt);
-  state.templates = state.templates.map(template => ({ recurrence: 'none', recurrenceDays: null, priority: 'normal', assigneeId: null, nextTemplateId: null, nextDelayMinutes: 0, autoGenerate: false, nextRunDate: '', ...template }));
+  state.templates = state.templates.map(template => ({ recurrence: 'none', recurrenceDays: null, priority: 'normal', assigneeId: null, nextTemplateId: null, nextDelayMinutes: 0, autoGenerate: false, nextRunDate: '', dueTime: '', reminderMinutes: null, ...template }));
   state.templates.sort((a, b) => (roomById(a.roomId)?.order ?? 999) - (roomById(b.roomId)?.order ?? 999) || a.title.localeCompare(b.title, 'es'));
 }
 
@@ -469,6 +517,8 @@ async function materializeAutoRoutines() {
         assigneeId: template.assigneeId || null,
         assigneeName: template.assigneeId ? userName(template.assigneeId, '') : undefined,
         dueDate: runDate,
+        dueTime: template.dueTime || '',
+        reminderMinutes: parseReminderMinutes(template.reminderMinutes),
         priority: template.priority || 'normal',
         recurrence: 'none', recurrenceDays: null,
         nextTemplateId: template.nextTemplateId || null,
@@ -685,13 +735,13 @@ function todayTaskMarkup(task, { showDate = false, compact = false } = {}) {
   const room = roomById(task.roomId)?.name || 'Sin estancia';
   const person = userName(task.assigneeId, task.assigneeName);
   const waiting = isWaitingTask(task);
-  const datePart = showDate ? `<span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}</span>` : '';
+  const datePart = showDate ? `<span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}${task.dueTime ? ` · ${escapeHTML(task.dueTime)}` : ''}</span>` : '';
   const nextTemplate = task.nextTemplateId ? templateById(task.nextTemplateId) : null;
   return `<div class="today-task-row ${task.priority === 'high' ? 'high' : ''}${compact ? ' compact' : ''}${waiting ? ' waiting' : ''}" data-task-id="${task.id}">
     <button class="today-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}" title="${waiting ? availabilityText(task) : 'Completar'}" ${waiting ? 'disabled' : ''}>${waiting ? '⏳' : '✓'}</button>
     <button class="today-task-open" type="button" title="Editar tarea">
       <span class="today-task-title-line"><strong>${escapeHTML(task.title)}</strong><i class="today-person-avatar" title="${escapeHTML(person)}">${escapeHTML(todayPersonInitial(task))}</i></span>
-      <span>${escapeHTML(room)} · ${escapeHTML(person)}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}${waiting ? ` · ⏳ ${escapeHTML(availabilityText(task))}` : ''}${nextTemplate ? ` · → ${escapeHTML(nextTemplate.title)}` : ''}</span>
+      <span>${escapeHTML(room)} · ${escapeHTML(person)}${task.dueTime ? ` · 🕒 ${escapeHTML(task.dueTime)}` : ''}${reminderText(task) ? ` · 🔔 ${escapeHTML(reminderText(task))}` : ''}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}${waiting ? ` · ⏳ ${escapeHTML(availabilityText(task))}` : ''}${nextTemplate ? ` · → ${escapeHTML(nextTemplate.title)}` : ''}</span>
     </button>
     ${datePart}
     <div class="today-task-actions">
@@ -706,7 +756,7 @@ async function postponeTask(id, value = '1') {
   const task = state.tasks.find(item => item.id === id);
   if (!task) return;
   const dueDate = value === 'none' ? '' : addDaysISO(Math.max(1, Number(value) || 1));
-  await put('tasks', { ...task, dueDate, availableAt: null, modifiedAt: Date.now() });
+  await put('tasks', { ...task, dueDate, dueTime: value === 'none' ? '' : task.dueTime, reminderMinutes: value === 'none' ? null : task.reminderMinutes, availableAt: null, modifiedAt: Date.now() });
   await loadState();
   renderAll();
   showToast(value === 'none' ? 'Tarea dejada sin fecha' : value === '1' ? 'Tarea pasada a mañana' : `Tarea aplazada ${value} días`);
@@ -783,8 +833,8 @@ function renderToday() {
   const waitingTasks = pendingAll.filter(task => isWaitingTask(task)).sort((a, b) => Number(a.availableAt || 0) - Number(b.availableAt || 0));
   const pending = pendingAll.filter(task => !isWaitingTask(task));
   const byPriorityThenCreated = (a, b) => (a.priority === b.priority ? 0 : a.priority === 'high' ? -1 : 1) || (a.createdAt || 0) - (b.createdAt || 0);
-  const dueToday = pending.filter(task => task.dueDate === today).sort(byPriorityThenCreated);
-  const overdue = pending.filter(task => task.dueDate && task.dueDate < today).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || byPriorityThenCreated(a, b));
+  const overdue = pending.filter(isOverdue).sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '') || (a.dueTime || '').localeCompare(b.dueTime || '') || byPriorityThenCreated(a, b));
+  const dueToday = pending.filter(task => task.dueDate === today && !isOverdue(task)).sort((a, b) => (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99') || byPriorityThenCreated(a, b));
   const noDate = pending.filter(task => !task.dueDate).sort(byPriorityThenCreated);
   const tomorrowTasks = pending.filter(task => task.dueDate === tomorrow).sort(byPriorityThenCreated);
   const doneToday = state.history.filter(item => localISO(new Date(item.completedAt)) === today && (selected === 'all' || (selected === 'unassigned' ? !item.assigneeId : item.assigneeId === selected)));
@@ -872,7 +922,8 @@ function renderTasks() {
         <div class="task-meta">
           <span>${escapeHTML(room)}</span>
           <span>${escapeHTML(person)}</span>
-          <span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}</span>
+          <span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}${task.dueTime ? ` · ${escapeHTML(task.dueTime)}` : ''}</span>
+          ${reminderText(task) ? `<span class="reminder-badge">🔔 ${escapeHTML(reminderText(task))}</span>` : ''}
           ${(task.recurrence && task.recurrence !== 'none') ? `<span class="recurrence-badge">↻ ${escapeHTML(recurrenceText(task))}</span>` : ''}
           ${waiting ? `<span class="waiting-badge">⏳ ${escapeHTML(availabilityText(task))}</span>` : ''}
           ${nextTemplate ? `<span class="chain-badge">→ ${escapeHTML(nextTemplate.title)}</span>` : ''}
@@ -1100,7 +1151,7 @@ function renderRoutines() {
     return `<article class="routine-card" data-template-id="${template.id}">
       <div class="routine-main">
         <div class="routine-title-row"><strong>${escapeHTML(template.title)}</strong>${template.priority === 'high' ? '<i class="priority-dot" title="Prioridad alta"></i>' : ''}</div>
-        <div class="task-meta"><span>${escapeHTML(room)}</span><span>${escapeHTML(person)}</span><span class="recurrence-badge">${template.recurrence && template.recurrence !== 'none' ? '↻ ' : ''}${escapeHTML(recurrenceText(template))}</span>${template.autoGenerate ? `<span class="auto-badge">⚡ Auto · ${escapeHTML(formatDate(template.nextRunDate || todayISO()))}</span>` : ''}${template.nextTemplateId && templateById(template.nextTemplateId) ? `<span class="chain-badge">→ ${escapeHTML(templateById(template.nextTemplateId).title)}</span>` : ''}</div>
+        <div class="task-meta"><span>${escapeHTML(room)}</span><span>${escapeHTML(person)}</span>${template.dueTime ? `<span>🕒 ${escapeHTML(template.dueTime)}</span>` : ''}${reminderText(template) ? `<span class="reminder-badge">🔔 ${escapeHTML(reminderText(template))}</span>` : ''}<span class="recurrence-badge">${template.recurrence && template.recurrence !== 'none' ? '↻ ' : ''}${escapeHTML(recurrenceText(template))}</span>${template.autoGenerate ? `<span class="auto-badge">⚡ Auto · ${escapeHTML(formatDate(template.nextRunDate || todayISO()))}</span>` : ''}${template.nextTemplateId && templateById(template.nextTemplateId) ? `<span class="chain-badge">→ ${escapeHTML(templateById(template.nextTemplateId).title)}</span>` : ''}</div>
       </div>
       <div class="routine-actions">
         <button class="secondary-button routine-create" type="button">Crear hoy</button>
@@ -1115,6 +1166,19 @@ function renderRoutines() {
     card.querySelector('.routine-edit').addEventListener('click', () => openRoutineDialog(id));
     card.querySelector('.routine-delete').addEventListener('click', () => deleteRoutine(id));
   });
+}
+
+function updateReminderControlAvailability() {
+  if (els.taskReminderMinutes) {
+    const enabled = !!(els.taskDueDate?.value && els.taskDueTime?.value);
+    els.taskReminderMinutes.disabled = !enabled;
+    if (!enabled) els.taskReminderMinutes.value = '';
+  }
+  if (els.routineReminderMinutes) {
+    const enabled = !!els.routineDueTime?.value;
+    els.routineReminderMinutes.disabled = !enabled;
+    if (!enabled) els.routineReminderMinutes.value = '';
+  }
 }
 
 function updateCustomRecurrenceVisibility() {
@@ -1136,6 +1200,8 @@ function openRoutineDialog(templateId = null) {
     els.routineRoom.value = template.roomId;
     els.routineAssignee.value = template.assigneeId || '';
     els.routinePriority.value = template.priority || 'normal';
+    els.routineDueTime.value = template.dueTime || '';
+    els.routineReminderMinutes.value = template.reminderMinutes === null || template.reminderMinutes === undefined ? '' : String(template.reminderMinutes);
     els.routineRecurrence.value = template.recurrence || 'none';
     els.routineRecurrenceDays.value = template.recurrenceDays || 2;
     els.routineNextTemplate.value = template.nextTemplateId || '';
@@ -1147,6 +1213,8 @@ function openRoutineDialog(templateId = null) {
     els.routineDialogTitle.textContent = 'Nueva rutina';
     els.routineForm.reset();
     els.routinePriority.value = 'normal';
+    els.routineDueTime.value = '';
+    els.routineReminderMinutes.value = '';
     els.routineRecurrence.value = 'weekly';
     els.routineRecurrenceDays.value = 2;
     els.routineAssignee.value = '';
@@ -1157,6 +1225,7 @@ function openRoutineDialog(templateId = null) {
     if (els.routineRoomFilter.value !== 'all') els.routineRoom.value = els.routineRoomFilter.value;
   }
   updateCustomRecurrenceVisibility();
+  updateReminderControlAvailability();
   els.routineDialog.showModal();
   setTimeout(() => els.routineTitle.focus(), 50);
 }
@@ -1175,6 +1244,8 @@ async function saveRoutine(event) {
     roomId: els.routineRoom.value,
     assigneeId: els.routineAssignee.value || null,
     priority: els.routinePriority.value,
+    dueTime: els.routineDueTime.value || '',
+    reminderMinutes: els.routineDueTime.value ? parseReminderMinutes(els.routineReminderMinutes.value) : null,
     recurrence: els.routineRecurrence.value,
     recurrenceDays: els.routineRecurrence.value === 'custom' ? Math.max(2, Number(els.routineRecurrenceDays.value) || 2) : null,
     nextTemplateId: els.routineNextTemplate.value || null,
@@ -1221,7 +1292,7 @@ async function createTaskFromTemplate(id) {
     id: makeId(), templateId: template.id, title: template.title, roomId: template.roomId,
     assigneeId: template.assigneeId || null,
     assigneeName: template.assigneeId ? userName(template.assigneeId, '') : undefined,
-    dueDate: todayISO(), priority: template.priority || 'normal',
+    dueDate: todayISO(), dueTime: template.dueTime || '', reminderMinutes: parseReminderMinutes(template.reminderMinutes), priority: template.priority || 'normal',
     recurrence: template.autoGenerate ? 'none' : (template.recurrence || 'none'), recurrenceDays: template.autoGenerate ? null : (template.recurrenceDays || null),
     nextTemplateId: template.nextTemplateId || null, nextDelayMinutes: Number(template.nextDelayMinutes || 0),
     completed: false, createdAt: Date.now(), modifiedAt: Date.now(),
@@ -1257,7 +1328,7 @@ function planTaskMarkup(task) {
     <button class="plan-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}" ${waiting ? 'disabled' : ''}>${waiting ? '⏳' : '✓'}</button>
     <button class="plan-task-open" type="button" title="Editar tarea">
       <strong>${escapeHTML(task.title)}</strong>
-      <span>${escapeHTML(room)}</span>
+      <span>${escapeHTML(room)}${task.dueTime ? ` · ${escapeHTML(task.dueTime)}` : ''}</span>
       <small>${escapeHTML(person)}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}${waiting ? ` · ${escapeHTML(availabilityText(task))}` : ''}</small>
     </button>
   </div>`;
@@ -1354,6 +1425,7 @@ function renderSettings() {
   renderRoomSettings();
   if (els.appVersionDisplay) els.appVersionDisplay.textContent = APP_VERSION;
   if (els.lastForcedUpdate) els.lastForcedUpdate.textContent = formatSyncTime(localStorage.getItem('hometasks-last-forced-update'));
+  renderNotificationSettings();
   renderSyncPanel();
 }
 
@@ -1369,6 +1441,7 @@ function renderAll() {
   renderActivityStats();
   renderHistory();
   renderSettings();
+  updateAppBadge();
 }
 
 function openTaskDialog(taskId = null, presetDate = null) {
@@ -1384,18 +1457,23 @@ function openTaskDialog(taskId = null, presetDate = null) {
     els.taskRoom.value = task.roomId;
     els.taskAssignee.value = task.assigneeId || '';
     els.taskDueDate.value = task.dueDate || '';
+    els.taskDueTime.value = task.dueTime || '';
+    els.taskReminderMinutes.value = task.reminderMinutes === null || task.reminderMinutes === undefined ? '' : String(task.reminderMinutes);
     els.taskPriority.value = task.priority || 'normal';
     els.taskRecurrence.value = task.recurrence || 'none';
     els.taskRecurrenceDays.value = task.recurrenceDays || 2;
     els.taskNextTemplate.value = task.nextTemplateId || '';
     els.taskNextDelay.value = String(Number(task.nextDelayMinutes || 0));
     updateCustomRecurrenceVisibility();
+    updateReminderControlAvailability();
   } else {
     els.taskDialogEyebrow.textContent = 'Nueva actividad';
     els.taskDialogTitle.textContent = 'Anadir tarea';
     els.saveTaskButton.textContent = 'Guardar tarea';
     els.taskForm.reset();
     els.taskDueDate.value = presetDate || todayISO();
+    els.taskDueTime.value = '';
+    els.taskReminderMinutes.value = '';
     els.taskPriority.value = 'normal';
     const todayAssignee = state.view === 'today' ? (els.todayAssigneeFilter?.value || 'all') : 'all';
     els.taskAssignee.value = todayAssignee !== 'all' && todayAssignee !== 'unassigned' ? todayAssignee : '';
@@ -1404,6 +1482,7 @@ function openTaskDialog(taskId = null, presetDate = null) {
     els.taskNextTemplate.value = '';
     els.taskNextDelay.value = '0';
     updateCustomRecurrenceVisibility();
+    updateReminderControlAvailability();
     if (els.roomFilter.value !== 'all') els.taskRoom.value = els.roomFilter.value;
   }
 
@@ -1426,6 +1505,8 @@ async function saveTask(event) {
       assigneeId: els.taskAssignee.value || null,
       assigneeName: els.taskAssignee.value ? userName(els.taskAssignee.value, '') : undefined,
       dueDate: els.taskDueDate.value || '',
+      dueTime: els.taskDueTime.value || '',
+      reminderMinutes: els.taskDueTime.value ? parseReminderMinutes(els.taskReminderMinutes.value) : null,
       priority: els.taskPriority.value,
       recurrence: els.taskRecurrence.value,
       recurrenceDays: els.taskRecurrence.value === 'custom' ? Math.max(2, Number(els.taskRecurrenceDays.value) || 2) : null,
@@ -1433,6 +1514,7 @@ async function saveTask(event) {
       nextDelayMinutes: els.taskNextTemplate.value ? Math.max(0, Number(els.taskNextDelay.value) || 0) : 0,
       modifiedAt: Date.now(),
     });
+    await closeTaskNotification(existing.id);
     showToast('Tarea actualizada');
   } else {
     await put('tasks', {
@@ -1442,6 +1524,8 @@ async function saveTask(event) {
       assigneeId: els.taskAssignee.value || null,
       assigneeName: els.taskAssignee.value ? userName(els.taskAssignee.value, '') : undefined,
       dueDate: els.taskDueDate.value || '',
+      dueTime: els.taskDueTime.value || '',
+      reminderMinutes: els.taskDueTime.value ? parseReminderMinutes(els.taskReminderMinutes.value) : null,
       priority: els.taskPriority.value,
       recurrence: els.taskRecurrence.value,
       recurrenceDays: els.taskRecurrence.value === 'custom' ? Math.max(2, Number(els.taskRecurrenceDays.value) || 2) : null,
@@ -1482,6 +1566,8 @@ async function createChainedTask(task, completedAt) {
     assigneeId: nextTemplate.assigneeId || null,
     assigneeName: nextTemplate.assigneeId ? userName(nextTemplate.assigneeId, '') : undefined,
     dueDate: localISO(new Date(availableAt)),
+    dueTime: delayMinutes ? localTimeHHMM(new Date(availableAt)) : (nextTemplate.dueTime || ''),
+    reminderMinutes: parseReminderMinutes(nextTemplate.reminderMinutes),
     availableAt: delayMinutes ? availableAt : null,
     priority: nextTemplate.priority || 'normal',
     recurrence: 'none', recurrenceDays: null,
@@ -1512,6 +1598,7 @@ async function toggleTask(id) {
       completedAt, recurring: true, modifiedAt: completedAt,
     });
     await put('tasks', { ...task, completed: false, completedAt: null, lastCompletedAt: completedAt, dueDate: nextDueDate, modifiedAt: completedAt });
+    await closeTaskNotification(task.id);
     await loadState();
     renderAll();
     showToast(chainedTask ? `Completada · ${chainedTask.title} ${chainDelayText(task.nextDelayMinutes)}` : `Completada · próxima ${formatDate(nextDueDate)}`);
@@ -1521,6 +1608,7 @@ async function toggleTask(id) {
 
   const updated = { ...task, completed: completing, completedAt: completing ? Date.now() : null, modifiedAt: Date.now() };
   await put('tasks', updated);
+  if (completing) await closeTaskNotification(task.id);
   if (completing) {
     await put('history', {
       id: makeId(), taskId: task.id, title: task.title, roomId: task.roomId,
@@ -1548,6 +1636,7 @@ async function deleteTask(id) {
   if (!confirm(`¿Eliminar "${task.title}"?`)) return;
   await markDeleted('tasks', id);
   await remove('tasks', id);
+  await closeTaskNotification(id);
   await loadState();
   renderAll();
   showToast('Tarea eliminada · histórico conservado');
@@ -2535,6 +2624,246 @@ function setupAutoSync() {
   });
 }
 
+function notificationsSupported() {
+  return 'Notification' in window && 'serviceWorker' in navigator;
+}
+
+function notificationPermissionLabel() {
+  if (!notificationsSupported()) return 'No compatible';
+  if (Notification.permission === 'granted') return 'Permitidas';
+  if (Notification.permission === 'denied') return 'Bloqueadas';
+  return 'Pendiente';
+}
+
+function notificationSettingEnabled(key, fallback = false) {
+  const value = localStorage.getItem(key);
+  return value === null ? fallback : value === '1';
+}
+
+function renderNotificationSettings() {
+  if (!els.notificationPermissionStatus) return;
+  const supported = notificationsSupported();
+  const permission = supported ? Notification.permission : 'unsupported';
+  const enabled = notificationSettingEnabled(LS_NOTIFICATIONS_ENABLED, false);
+
+  els.notificationPermissionStatus.textContent = notificationPermissionLabel();
+  els.notificationStatusPill.textContent = !supported ? 'No compatible' : permission === 'granted' && enabled ? 'Activo' : permission === 'denied' ? 'Bloqueado' : 'Inactivo';
+  els.notificationStatusPill.classList.toggle('connected', supported && permission === 'granted' && enabled);
+  els.notificationsEnabledToggle.checked = enabled;
+  els.notificationsEnabledToggle.disabled = !supported || permission !== 'granted';
+  els.dailySummaryToggle.checked = notificationSettingEnabled(LS_DAILY_SUMMARY_ENABLED, true);
+  els.dailySummaryToggle.disabled = !enabled || permission !== 'granted';
+  els.dailySummaryTime.value = localStorage.getItem(LS_DAILY_SUMMARY_TIME) || '08:00';
+  els.dailySummaryTime.disabled = !enabled || permission !== 'granted' || !els.dailySummaryToggle.checked;
+  els.overdueNotificationToggle.checked = notificationSettingEnabled(LS_OVERDUE_NOTIFICATIONS, true);
+  els.overdueNotificationToggle.disabled = !enabled || permission !== 'granted';
+  els.requestNotificationPermissionButton.hidden = !supported || permission === 'granted';
+  els.requestNotificationPermissionButton.disabled = permission === 'denied';
+  els.testNotificationButton.disabled = !supported || permission !== 'granted';
+
+  if (!supported) {
+    els.notificationHelpText.textContent = 'Este navegador no expone las APIs necesarias para los avisos del sistema.';
+  } else if (permission === 'denied') {
+    els.notificationHelpText.textContent = 'Las notificaciones están bloqueadas para este sitio. Debes habilitarlas desde los permisos del navegador o de Android.';
+  } else {
+    els.notificationHelpText.textContent = 'Los avisos exactos se comprueban mientras HomeTasks está abierta y al volver a primer plano. Sin un servicio push externo, Android no garantiza temporizadores exactos con la PWA completamente cerrada.';
+  }
+}
+
+function loadNotificationLog() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LS_NOTIFICATION_LOG) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveNotificationLog(log) {
+  const entries = Object.entries(log).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0)).slice(0, 250);
+  localStorage.setItem(LS_NOTIFICATION_LOG, JSON.stringify(Object.fromEntries(entries)));
+}
+
+async function closeTaskNotification(taskId) {
+  if (!notificationsSupported()) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration || !registration.getNotifications) return;
+    const notifications = await registration.getNotifications({ tag: `hometasks-task-${taskId}` });
+    notifications.forEach(notification => notification.close());
+  } catch (_) {}
+}
+
+async function showSystemNotification(title, options = {}) {
+  if (!notificationsSupported() || Notification.permission !== 'granted') return false;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration) return false;
+    await registration.showNotification(title, {
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-192.png',
+      tag: options.tag || `hometasks-${Date.now()}`,
+      body: options.body || '',
+      data: options.data || { url: './' },
+      timestamp: options.timestamp || Date.now(),
+      renotify: false,
+    });
+    return true;
+  } catch (error) {
+    console.warn('No se pudo mostrar la notificación:', error);
+    return false;
+  }
+}
+
+async function requestNotificationPermission() {
+  if (!notificationsSupported()) {
+    showToast('Este navegador no admite notificaciones');
+    renderNotificationSettings();
+    return;
+  }
+  try {
+    const result = await Notification.requestPermission();
+    if (result === 'granted') {
+      localStorage.setItem(LS_NOTIFICATIONS_ENABLED, '1');
+      showToast('Notificaciones activadas');
+      await checkReminders({ force: true });
+    } else if (result === 'denied') {
+      showToast('Permiso de notificaciones bloqueado');
+    }
+  } catch (error) {
+    console.warn(error);
+    showToast('No se pudo solicitar el permiso');
+  }
+  renderNotificationSettings();
+}
+
+function saveNotificationPreferences() {
+  localStorage.setItem(LS_NOTIFICATIONS_ENABLED, els.notificationsEnabledToggle.checked ? '1' : '0');
+  localStorage.setItem(LS_DAILY_SUMMARY_ENABLED, els.dailySummaryToggle.checked ? '1' : '0');
+  localStorage.setItem(LS_DAILY_SUMMARY_TIME, els.dailySummaryTime.value || '08:00');
+  localStorage.setItem(LS_OVERDUE_NOTIFICATIONS, els.overdueNotificationToggle.checked ? '1' : '0');
+  renderNotificationSettings();
+  updateAppBadge();
+  if (els.notificationsEnabledToggle.checked) setTimeout(() => checkReminders(), 100);
+}
+
+async function testNotification() {
+  if (!notificationsSupported()) return;
+  if (Notification.permission !== 'granted') {
+    await requestNotificationPermission();
+    if (Notification.permission !== 'granted') return;
+  }
+  const ok = await showSystemNotification('HomeTasks', {
+    body: 'Las notificaciones están configuradas correctamente en este dispositivo.',
+    tag: 'hometasks-test',
+    data: { url: './' },
+  });
+  showToast(ok ? 'Notificación de prueba enviada' : 'No se pudo enviar la notificación');
+}
+
+function dailySummaryReached(now = new Date()) {
+  const value = localStorage.getItem(LS_DAILY_SUMMARY_TIME) || '08:00';
+  const [hour, minute] = value.split(':').map(Number);
+  const threshold = new Date(now);
+  threshold.setHours(Number.isFinite(hour) ? hour : 8, Number.isFinite(minute) ? minute : 0, 0, 0);
+  return now >= threshold;
+}
+
+async function checkReminders({ force = false } = {}) {
+  if (!notificationSettingEnabled(LS_NOTIFICATIONS_ENABLED, false)) return;
+  if (!notificationsSupported() || Notification.permission !== 'granted') return;
+
+  const now = Date.now();
+  const today = todayISO();
+  const log = loadNotificationLog();
+  let logChanged = false;
+  let summaryShownNow = false;
+  const pending = state.tasks.filter(task => !task.completed && !isWaitingTask(task));
+
+  for (const task of pending) {
+    const dueTs = taskDueTimestamp(task);
+    const reminderMinutes = parseReminderMinutes(task.reminderMinutes);
+    if (!dueTs || reminderMinutes === null) continue;
+    const remindTs = dueTs - reminderMinutes * 60000;
+    const key = `task:${task.id}:${task.dueDate}:${task.dueTime}:${reminderMinutes}`;
+    // Evita avisos individuales obsoletos: un recordatorio exacto solo se muestra
+    // hasta una hora después de la hora de vencimiento.
+    if (!log[key] && now >= remindTs && now <= dueTs + 3600000) {
+      const room = roomById(task.roomId)?.name || 'Sin estancia';
+      const person = userName(task.assigneeId, task.assigneeName);
+      const lead = reminderMinutes === 0 ? 'Ahora' : reminderText(task);
+      const shown = await showSystemNotification(task.title, {
+        body: `${lead} · ${room} · ${person}`,
+        tag: `hometasks-task-${task.id}`,
+        timestamp: dueTs,
+        data: { url: './', taskId: task.id },
+      });
+      if (shown) {
+        log[key] = now;
+        logChanged = true;
+      }
+    }
+  }
+
+  if (notificationSettingEnabled(LS_DAILY_SUMMARY_ENABLED, true) && dailySummaryReached(new Date(now))) {
+    const key = `summary:${today}`;
+    if (!log[key]) {
+      const todayCount = pending.filter(task => task.dueDate === today).length;
+      const overdueCount = pending.filter(isOverdue).length;
+      if (todayCount || overdueCount) {
+        const shown = await showSystemNotification('Resumen de HomeTasks', {
+          body: `${todayCount} tarea${todayCount === 1 ? '' : 's'} para hoy · ${overdueCount} vencida${overdueCount === 1 ? '' : 's'}`,
+          tag: `hometasks-summary-${today}`,
+          data: { url: './' },
+        });
+        if (shown) {
+          log[key] = now;
+          logChanged = true;
+          summaryShownNow = true;
+        }
+      }
+    }
+  }
+
+  if (notificationSettingEnabled(LS_OVERDUE_NOTIFICATIONS, true) && !summaryShownNow) {
+    const key = `overdue:${today}`;
+    const overdue = pending.filter(isOverdue);
+    if (overdue.length && !log[key]) {
+      const shown = await showSystemNotification('Tareas vencidas', {
+        body: `Hay ${overdue.length} tarea${overdue.length === 1 ? '' : 's'} vencida${overdue.length === 1 ? '' : 's'} pendiente${overdue.length === 1 ? '' : 's'}.`,
+        tag: `hometasks-overdue-${today}`,
+        data: { url: './' },
+      });
+      if (shown) {
+        log[key] = now;
+        logChanged = true;
+      }
+    }
+  }
+
+  if (logChanged) saveNotificationLog(log);
+}
+
+function setupReminderEngine() {
+  if (state.reminderTimer) clearInterval(state.reminderTimer);
+  state.reminderTimer = setInterval(() => checkReminders(), 60000);
+  setTimeout(() => checkReminders(), 1800);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') setTimeout(() => checkReminders(), 200);
+  });
+  window.addEventListener('focus', () => setTimeout(() => checkReminders(), 200));
+}
+
+function updateAppBadge() {
+  if (!('setAppBadge' in navigator) && !('clearAppBadge' in navigator)) return;
+  const today = todayISO();
+  const count = state.tasks.filter(task => !task.completed && !isWaitingTask(task) && task.dueDate && task.dueDate <= today).length;
+  try {
+    if (count && navigator.setAppBadge) navigator.setAppBadge(count);
+    else if (navigator.clearAppBadge) navigator.clearAppBadge();
+  } catch (_) {}
+}
+
 async function forceAppUpdate() {
   if (!confirm('¿Forzar la descarga de la versión publicada más reciente? Tus tareas, URL de Apps Script, clave y preferencias se conservarán.')) return;
   const button = els.forceAppUpdateButton;
@@ -2642,6 +2971,9 @@ function setupEvents() {
   els.cancelDialogButton.addEventListener('click', () => { state.editingTaskId = null; els.taskDialog.close(); });
   els.taskForm.addEventListener('submit', saveTask);
   els.taskRecurrence.addEventListener('change', updateCustomRecurrenceVisibility);
+  els.taskDueDate?.addEventListener('change', updateReminderControlAvailability);
+  els.taskDueTime?.addEventListener('change', updateReminderControlAvailability);
+  els.routineDueTime?.addEventListener('change', updateReminderControlAvailability);
   els.taskNextTemplate?.addEventListener('change', updateCustomRecurrenceVisibility);
   els.routineRecurrence.addEventListener('change', updateCustomRecurrenceVisibility);
   els.routineNextTemplate?.addEventListener('change', updateCustomRecurrenceVisibility);
@@ -2675,13 +3007,20 @@ function setupEvents() {
     localStorage.setItem(LS_AUTO_SYNC, els.autoSyncToggle.checked ? '1' : '0');
     renderSyncPanel();
   });
+  els.requestNotificationPermissionButton?.addEventListener('click', requestNotificationPermission);
+  els.testNotificationButton?.addEventListener('click', testNotification);
+  els.notificationsEnabledToggle?.addEventListener('change', saveNotificationPreferences);
+  els.dailySummaryToggle?.addEventListener('change', saveNotificationPreferences);
+  els.dailySummaryTime?.addEventListener('change', saveNotificationPreferences);
+  els.overdueNotificationToggle?.addEventListener('change', saveNotificationPreferences);
+
   els.exportBackupButton.addEventListener('click', exportLocalBackup);
   els.importBackupButton.addEventListener('click', () => els.importBackupFile.click());
   els.importBackupFile.addEventListener('change', () => importLocalBackup(els.importBackupFile.files?.[0]));
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V7 en este dispositivo?')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V8 en este dispositivo?')) return;
     await resetDatabase();
     await ensureV1Data();
     await ensureV2Data();
@@ -2689,13 +3028,14 @@ function setupEvents() {
     await ensureV4Data();
     await ensureV41Data();
     await ensureV6Data();
+    await ensureV8Data();
     await loadState();
     await materializeAutoRoutines();
     els.roomFilter.value = 'all';
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V7 restablecida');
+    showToast('V8 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
@@ -2715,12 +3055,14 @@ async function init() {
   await ensureV4Data();
   await ensureV41Data();
   await ensureV6Data();
+  await ensureV8Data();
   await loadState();
   await materializeAutoRoutines();
   renderAll();
   setupAutoSync();
   setInterval(() => { if (state.tasks.some(task => isWaitingTask(task))) renderAll(); }, 60000);
   await setupServiceWorker();
+  setupReminderEngine();
 }
 
 init().catch(error => {

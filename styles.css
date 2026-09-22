@@ -701,3 +701,31 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
   .trend-bar-wrap { height:126px; }
   .bottom-nav .nav-item small { max-width:54px; overflow:hidden; text-overflow:ellipsis; }
 }
+
+/* V8 · recordatorios y avisos */
+.reminder-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: .78rem;
+  opacity: .9;
+}
+.notification-card .notification-time-field {
+  max-width: 240px;
+}
+.notification-card .sync-actions {
+  margin-top: 10px;
+  margin-bottom: 8px;
+}
+.notification-card .setting-help {
+  margin-top: 10px;
+}
+.notification-card input[type="time"] {
+  width: 100%;
+}
+@media (max-width: 720px) {
+  .notification-card .notification-time-field {
+    max-width: none;
+  }
+}
