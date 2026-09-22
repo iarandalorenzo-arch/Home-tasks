@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '4.1.1';
+const APP_VERSION = '4.1.2';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -1295,122 +1295,49 @@ async function importLocalBackup(file) {
   }
 }
 
-const appsScriptBridgeState = {
-  frame: null,
-  endpoint: '',
-  ready: false,
-  readyPromise: null,
-  readyResolve: null,
-  readyReject: null,
-  readyTimer: null,
-  pending: new Map(),
-};
-
-function resetAppsScriptBridge(reason = null) {
-  if (appsScriptBridgeState.readyTimer) clearTimeout(appsScriptBridgeState.readyTimer);
-  appsScriptBridgeState.readyTimer = null;
-  if (appsScriptBridgeState.frame) appsScriptBridgeState.frame.remove();
-  appsScriptBridgeState.frame = null;
-  appsScriptBridgeState.endpoint = '';
-  appsScriptBridgeState.ready = false;
-  if (appsScriptBridgeState.readyReject) {
-    try { appsScriptBridgeState.readyReject(reason || new Error('Puente de Apps Script reiniciado.')); } catch (_) {}
-  }
-  appsScriptBridgeState.readyPromise = null;
-  appsScriptBridgeState.readyResolve = null;
-  appsScriptBridgeState.readyReject = null;
-  for (const entry of appsScriptBridgeState.pending.values()) {
-    clearTimeout(entry.timer);
-    entry.reject(reason || new Error('Puente de Apps Script reiniciado.'));
-  }
-  appsScriptBridgeState.pending.clear();
-}
-
-function setupAppsScriptBridgeListener() {
-  window.addEventListener('message', event => {
-    const frame = appsScriptBridgeState.frame;
-    if (!frame || event.source !== frame.contentWindow) return;
-    const message = event.data;
-    if (!message || message.source !== 'hometasks-apps-script-bridge') return;
-
-    if (message.type === 'ready') {
-      appsScriptBridgeState.ready = true;
-      if (appsScriptBridgeState.readyTimer) clearTimeout(appsScriptBridgeState.readyTimer);
-      appsScriptBridgeState.readyTimer = null;
-      appsScriptBridgeState.readyResolve?.(true);
-      appsScriptBridgeState.readyResolve = null;
-      appsScriptBridgeState.readyReject = null;
-      return;
-    }
-
-    if (message.type === 'response' && message.id) {
-      const pending = appsScriptBridgeState.pending.get(message.id);
-      if (!pending) return;
-      appsScriptBridgeState.pending.delete(message.id);
-      clearTimeout(pending.timer);
-      if (message.ok) pending.resolve(message.result);
-      else pending.reject(new Error(message.error || 'Apps Script rechazó la petición.'));
-    }
-  });
-}
-
-function ensureAppsScriptBridge(endpoint, timeoutMs = 20000) {
-  if (appsScriptBridgeState.ready && appsScriptBridgeState.endpoint === endpoint && appsScriptBridgeState.frame) {
-    return Promise.resolve(true);
-  }
-  if (appsScriptBridgeState.readyPromise && appsScriptBridgeState.endpoint === endpoint) return appsScriptBridgeState.readyPromise;
-
-  resetAppsScriptBridge();
-  appsScriptBridgeState.endpoint = endpoint;
-  appsScriptBridgeState.readyPromise = new Promise((resolve, reject) => {
-    appsScriptBridgeState.readyResolve = resolve;
-    appsScriptBridgeState.readyReject = reject;
-  });
-
-  const frame = document.createElement('iframe');
-  frame.title = 'HomeTasks Apps Script Sync Bridge';
-  frame.setAttribute('aria-hidden', 'true');
-  frame.tabIndex = -1;
-  frame.style.position = 'fixed';
-  frame.style.width = '1px';
-  frame.style.height = '1px';
-  frame.style.opacity = '0';
-  frame.style.pointerEvents = 'none';
-  frame.style.border = '0';
-  frame.style.left = '-10000px';
-  const url = new URL(endpoint);
-  url.searchParams.set('hometasks_bridge', '1');
-  url.searchParams.set('v', APP_VERSION);
-  url.searchParams.set('_', String(Date.now()));
-  frame.src = url.toString();
-  frame.onerror = () => {
-    resetAppsScriptBridge(new Error('No se ha podido cargar la aplicación web de Apps Script. Comprueba que esté desplegada como Aplicación web y que el acceso sea “Cualquiera”.'));
-  };
-  appsScriptBridgeState.frame = frame;
-  document.body.appendChild(frame);
-
-  appsScriptBridgeState.readyTimer = setTimeout(() => {
-    resetAppsScriptBridge(new Error('Apps Script no ha iniciado el puente de sincronización. Abre la URL /exec en una ventana privada: no debe pedir inicio de sesión. Después comprueba “Ejecutar como: Yo”, “Quién tiene acceso: Cualquiera” y vuelve a desplegar una nueva versión del script.'));
-  }, timeoutMs);
-
-  return appsScriptBridgeState.readyPromise;
-}
-
-async function appsScriptBridgeRequest(endpoint, payload, timeoutMs = 30000) {
-  await ensureAppsScriptBridge(endpoint);
-  const id = `ht-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function jsonpRequest(endpoint, action, houseKey, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      appsScriptBridgeState.pending.delete(id);
-      reject(new Error('Tiempo de espera agotado esperando la respuesta de Apps Script.'));
+    const callback = `__ht_jsonp_${Date.now()}_${Math.random().toString(16).slice(2)}`.replace(/[^A-Za-z0-9_$]/g, '_');
+    const url = new URL(endpoint);
+    url.searchParams.set('action', action);
+    url.searchParams.set('key', houseKey);
+    url.searchParams.set('callback', callback);
+    url.searchParams.set('_', String(Date.now()));
+    let timer;
+    const script = document.createElement('script');
+    const cleanup = () => {
+      clearTimeout(timer);
+      script.remove();
+      try { delete globalThis[callback]; } catch { globalThis[callback] = undefined; }
+    };
+    globalThis[callback] = payload => {
+      cleanup();
+      if (!payload?.ok) {
+        reject(new Error(payload?.message || payload?.error || 'El servidor de sincronización rechazó la petición.'));
+        return;
+      }
+      resolve(payload);
+    };
+    script.onerror = () => {
+      cleanup();
+      reject(new Error('No se ha podido leer la respuesta de Google Apps Script. Revisa la URL y la implementación.'));
+    };
+    timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('Tiempo de espera agotado al contactar con Apps Script.'));
     }, timeoutMs);
-    appsScriptBridgeState.pending.set(id, { resolve, reject, timer });
-    appsScriptBridgeState.frame.contentWindow.postMessage({
-      source: 'hometasks-parent',
-      type: 'request',
-      id,
-      payload,
-    }, '*');
+    script.src = url.toString();
+    document.head.appendChild(script);
+  });
+}
+
+async function noCorsPost(endpoint, payload) {
+  await fetch(endpoint, {
+    method: 'POST',
+    mode: 'no-cors',
+    cache: 'no-store',
+    redirect: 'follow',
+    body: JSON.stringify(payload),
   });
 }
 
@@ -1427,7 +1354,7 @@ const syncProviders = {
     async status() {
       const { endpoint, houseKey } = this.config();
       if (!endpoint || !houseKey) throw new Error('Configura primero la URL y la clave de la casa.');
-      const response = await appsScriptBridgeRequest(endpoint, { action: 'status', key: houseKey, deviceId: getDeviceId() });
+      const response = await jsonpRequest(endpoint, 'status', houseKey);
       return {
         hasCloud: Boolean(response.hasCloud),
         updatedAt: Number(response.updatedAt || 0),
@@ -1438,20 +1365,21 @@ const syncProviders = {
     async pull() {
       const { endpoint, houseKey } = this.config();
       if (!endpoint || !houseKey) throw new Error('Configura primero la URL y la clave de la casa.');
-      const response = await appsScriptBridgeRequest(endpoint, { action: 'pull', key: houseKey, deviceId: getDeviceId() }, 30000);
+      const response = await jsonpRequest(endpoint, 'pull', houseKey, 20000);
       return response.snapshot ? validateSnapshot(response.snapshot) : null;
     },
     async push(snapshot) {
       const { endpoint, houseKey } = this.config();
       if (!endpoint || !houseKey) throw new Error('Configura primero la URL y la clave de la casa.');
-      const response = await appsScriptBridgeRequest(endpoint, {
+      await noCorsPost(endpoint, {
         action: 'push',
         key: houseKey,
         deviceId: getDeviceId(),
         snapshot,
-      }, 45000);
-      if (!response?.ok) throw new Error(response?.message || response?.error || 'Apps Script no confirmó la escritura.');
-      return response.snapshot ? validateSnapshot(response.snapshot) : this.pull();
+      });
+      // doPost is intentionally no-CORS. A subsequent pull is the acknowledgement.
+      await new Promise(resolve => setTimeout(resolve, 650));
+      return this.pull();
     },
   },
 };
@@ -1534,7 +1462,6 @@ async function saveSyncConfig({ quiet = false } = {}) {
       localStorage.removeItem(LS_CLOUD_LINKED);
       localStorage.removeItem(LS_LAST_SYNC);
       state.syncStatus = null;
-      resetAppsScriptBridge();
     }
     renderSyncPanel();
     if (!quiet) showToast('Configuración de sincronización guardada');
@@ -1800,7 +1727,6 @@ async function init() {
   cacheElements();
   setupTheme();
   updateConnection();
-  setupAppsScriptBridgeListener();
   setupEvents();
   setupInstallPrompt();
   await ensureV1Data();
