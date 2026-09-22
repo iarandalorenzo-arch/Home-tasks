@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '4.2.0';
+const APP_VERSION = '4.2.1';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -1721,25 +1721,63 @@ async function createCloudFromLocal() {
 
 async function adoptCloudData() {
   if (!navigator.onLine || state.syncBusy) return;
-  if (!confirm('¿Usar los datos de la nube en este dispositivo? Antes se descargará una copia de seguridad de los datos locales.')) return;
+  if (!confirm('¿Usar los datos de la nube en este dispositivo? Antes intentaremos descargar una copia de seguridad de los datos locales.')) return;
+
+  const startedAt = Date.now();
+  localStorage.setItem(LS_LAST_SYNC_ATTEMPT, String(startedAt));
   try {
     state.syncBusy = true;
+    state.syncError = '';
+    setSyncProgress(8, 'Preparando este dispositivo', 'Creando una copia de seguridad de los datos locales antes de sustituirlos.');
+    renderSyncPanel();
+
     const provider = activeSyncProvider();
     const localBackup = await buildSyncSnapshot();
-    downloadSnapshot(localBackup, `HomeTasks_antes_de_nube_${todayISO()}.json`);
-    const remote = await provider.pull();
+
+    // On some Android PWAs a programmatic download may be blocked. The backup is
+    // useful, but it must never prevent adopting an already existing cloud.
+    try {
+      downloadSnapshot(localBackup, `HomeTasks_antes_de_nube_${todayISO()}.json`);
+    } catch (backupError) {
+      console.warn('No se pudo descargar la copia local previa:', backupError);
+    }
+
+    setSyncProgress(28, 'Contactando con Apps Script', 'Descargando la copia de HomeTasks almacenada en la nube.');
+    const remote = await provider.pull({
+      onRetry: ({ nextAttempt }) => {
+        setSyncProgress(36, 'Apps Script está tardando', `Reintentando la descarga automáticamente · intento ${nextAttempt} de 3.`);
+      }
+    });
     if (!remote) throw new Error('La nube HomeTasks está vacía.');
-    await applySnapshot(remote, { replace: true });
+
+    setSyncProgress(68, 'Datos recibidos', 'Validando la copia de la nube antes de reemplazar los datos locales.');
+    const validated = validateSnapshot(remote);
+
+    setSyncProgress(84, 'Aplicando datos de la nube', 'Sustituyendo la base local de este dispositivo.');
+    await applySnapshot(validated, { replace: true });
+
+    const completedAt = Date.now();
     localStorage.setItem(LS_CLOUD_LINKED, '1');
-    localStorage.setItem(LS_LAST_SYNC, String(Date.now()));
+    localStorage.setItem(LS_LAST_SYNC, String(completedAt));
     localStorage.setItem(LS_CLOUD_DIRTY, '0');
-    state.syncStatus = await provider.status();
+    state.syncStatus = {
+      hasCloud: true,
+      updatedAt: Number(validated.updatedAt || completedAt),
+      homeId: validated.homeId || null,
+      provider: provider.name,
+    };
+
     await loadState();
+    recordSyncResult(true, 'Datos de la nube cargados');
     renderAll();
+    finishSyncProgress(true, 'Dispositivo vinculado', `Datos de la nube cargados en ${((Date.now() - startedAt) / 1000).toFixed(1)} s.`);
     showToast('Datos de la nube cargados');
   } catch (error) {
     console.error(error);
-    alert(`No se han podido cargar los datos de la nube.\n\n${error.message}`);
+    recordSyncResult(false, error.message);
+    state.syncError = error.message;
+    finishSyncProgress(false, 'No se pudo usar la nube', error.message);
+    showToast('No se pudieron cargar los datos de la nube');
   } finally {
     state.syncBusy = false;
     renderSyncPanel();
