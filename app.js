@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '4.1.4';
+const APP_VERSION = '4.1.5';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -1231,14 +1231,27 @@ function mergeTombstones(localItems = [], remoteItems = []) {
 function mergeSnapshots(localSnapshot, remoteSnapshot) {
   const local = validateSnapshot(structuredClone(localSnapshot));
   const remote = validateSnapshot(structuredClone(remoteSnapshot));
-  const tombstones = mergeTombstones(local.tombstones, remote.tombstones);
+
+  // V4.1.5: delete-wins. A tombstone represents an explicit user deletion and
+  // must dominate every older/same-ID copy, even if device clocks differ.
+  // We lift deletedAt above the newest known copy so the existing Apps Script
+  // backend (which compares timestamps) also honours the deletion unchanged.
+  const tombstones = mergeTombstones(local.tombstones, remote.tombstones).map(tomb => {
+    let newestEntityTimestamp = 0;
+    for (const snapshot of [local, remote]) {
+      const entity = snapshot.data[tomb.store]?.find(item => item.id === tomb.entityId);
+      if (entity) newestEntityTimestamp = Math.max(newestEntityTimestamp, itemTimestamp(entity));
+    }
+    const deletedAt = Math.max(Number(tomb.deletedAt || 0), newestEntityTimestamp + 1);
+    return { ...tomb, deletedAt };
+  });
   const deleted = new Map(tombstones.map(item => [`${item.store}:${item.entityId}`, Number(item.deletedAt || 0)]));
   const data = {};
 
   for (const store of SYNCABLE_STORES) {
     data[store] = mergeEntityArrays(local.data[store], remote.data[store]).filter(item => {
       const deletedAt = deleted.get(`${store}:${item.id}`) || 0;
-      return itemTimestamp(item) > deletedAt;
+      return !deletedAt || itemTimestamp(item) > deletedAt;
     });
     if (store === 'rooms') data[store] = normalizeRooms(data[store]);
   }
