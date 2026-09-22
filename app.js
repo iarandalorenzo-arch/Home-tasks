@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '8.0.0';
+const APP_VERSION = '8.1.0';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -83,6 +83,25 @@ const mondayOfWeek = (date = new Date()) => {
   return result;
 };
 const weekStartForOffset = offset => addDaysToDate(mondayOfWeek(new Date()), offset * 7);
+
+
+const PLAN_START_MINUTES = 6 * 60;
+const PLAN_END_MINUTES = 24 * 60;
+const PLAN_SLOT_MINUTES = 15;
+const DEFAULT_TASK_DURATION = 30;
+const WEEKDAY_KEYS = ['sun','mon','tue','wed','thu','fri','sat'];
+const WORKDAY_LABELS = [['mon','Lunes'],['tue','Martes'],['wed','Miércoles'],['thu','Jueves'],['fri','Viernes'],['sat','Sábado'],['sun','Domingo']];
+function defaultWorkSchedule(){return Object.fromEntries(WORKDAY_LABELS.map(([key])=>[key,{active:false,start:'08:00',end:'17:00'}]));}
+function normalizeWorkSchedule(schedule){const base=defaultWorkSchedule();if(!schedule||typeof schedule!=='object')return base;for(const [key] of WORKDAY_LABELS){const v=schedule[key];if(!v||typeof v!=='object')continue;base[key]={active:!!v.active,start:/^\d{2}:\d{2}$/.test(v.start||'')?v.start:'08:00',end:/^\d{2}:\d{2}$/.test(v.end||'')?v.end:'17:00'};}return base;}
+function timeToMinutes(value){if(!/^\d{2}:\d{2}$/.test(String(value||'')))return null;const [h,m]=String(value).split(':').map(Number);return Number.isFinite(h)&&Number.isFinite(m)?h*60+m:null;}
+function minutesToTime(total){const n=Math.max(0,Math.min(1440,Number(total)||0));return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;}
+function normalizedDuration(value){const n=Number(value);return Number.isFinite(n)?Math.max(5,Math.min(480,Math.round(n/5)*5)):DEFAULT_TASK_DURATION;}
+function intervalsOverlap(aStart,aEnd,bStart,bEnd){return aStart<bEnd&&bStart<aEnd;}
+function workBlockForDate(user,dateISO){if(!user||!dateISO)return null;const date=new Date(`${dateISO}T12:00:00`);const item=normalizeWorkSchedule(user.workSchedule)[WEEKDAY_KEYS[date.getDay()]];if(!item?.active)return null;const start=timeToMinutes(item.start),end=timeToMinutes(item.end);return start!==null&&end!==null&&end>start?{start,end,...item}:null;}
+function slotConflicts(assigneeId,dateISO,startMinute,durationMinutes,excludeTaskId=null){if(!assigneeId||!dateISO||startMinute===null)return{ok:true};const duration=normalizedDuration(durationMinutes),endMinute=startMinute+duration;if(startMinute<PLAN_START_MINUTES||endMinute>PLAN_END_MINUTES)return{ok:false,reason:'La tarea debe quedar entre las 06:00 y las 24:00.'};const user=userById(assigneeId),work=workBlockForDate(user,dateISO);if(work&&intervalsOverlap(startMinute,endMinute,work.start,work.end))return{ok:false,reason:`${user?.name||'La persona'} trabaja de ${minutesToTime(work.start)} a ${minutesToTime(work.end)}.`};const conflict=state.tasks.find(task=>task.id!==excludeTaskId&&!task.completed&&task.assigneeId===assigneeId&&task.dueDate===dateISO&&task.dueTime&&intervalsOverlap(startMinute,endMinute,timeToMinutes(task.dueTime),timeToMinutes(task.dueTime)+normalizedDuration(task.durationMinutes)));return conflict?{ok:false,reason:`Coincide con “${conflict.title}” (${conflict.dueTime}–${minutesToTime(timeToMinutes(conflict.dueTime)+normalizedDuration(conflict.durationMinutes))}).`}:{ok:true};}
+function findFreeSlots(assigneeId,startDateISO,durationMinutes,{limit=6,maxDays=14,preferredMinute=null,excludeTaskId=null}={}){if(!assigneeId)return[];const result=[],duration=normalizedDuration(durationMinutes);let date=new Date(`${startDateISO||todayISO()}T12:00:00`);for(let dayOffset=0;dayOffset<maxDays&&result.length<limit;dayOffset++){const iso=localISO(date);let first=PLAN_START_MINUTES;if(dayOffset===0&&preferredMinute!==null)first=Math.max(first,preferredMinute);if(iso===todayISO()){const now=new Date(),current=now.getHours()*60+now.getMinutes();first=Math.max(first,Math.ceil(current/PLAN_SLOT_MINUTES)*PLAN_SLOT_MINUTES);}first=Math.ceil(first/PLAN_SLOT_MINUTES)*PLAN_SLOT_MINUTES;for(let minute=first;minute+duration<=PLAN_END_MINUTES&&result.length<limit;minute+=PLAN_SLOT_MINUTES)if(slotConflicts(assigneeId,iso,minute,duration,excludeTaskId).ok)result.push({date:iso,time:minutesToTime(minute),duration});date.setDate(date.getDate()+1);}return result;}
+function firstFreeSlotOnDate(assigneeId,dateISO,durationMinutes,preferredTime='',excludeTaskId=null){const preferred=timeToMinutes(preferredTime);return findFreeSlots(assigneeId,dateISO,durationMinutes,{limit:1,maxDays:1,preferredMinute:preferred,excludeTaskId})[0]||null;}
+function durationText(minutes){const v=normalizedDuration(minutes);return v<60?`${v} min`:v%60===0?`${v/60} h`:`${Math.floor(v/60)} h ${v%60} min`;}
 
 const defaultRooms = [
   { id: 'entry', name: 'Recibidor', order: 1 },
@@ -239,6 +258,7 @@ const state = {
   view: 'today',
   editingTaskId: null,
   editingRoutineId: null,
+  editingWorkUserId: null,
   planWeekOffset: 0,
   syncStatus: null,
   syncBusy: false,
@@ -261,9 +281,9 @@ function cacheElements() {
     'routineRoomFilter','routineSearch','routineList','newRoutineButton','templateCount','activeRoutineCount',
     'planPrevWeek','planTodayWeek','planNextWeek','planWeekLabel','planAssigneeFilter','weeklyPlanner','planBacklog','workloadSummary',
     'houseNameInput','saveHouseNameButton','addUserForm','newUserName','userList','roomSettingsList','saveRoomNamesButton',
-    'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskDueTime','taskReminderMinutes','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','taskNextTemplate','taskNextDelay','taskNextDelayWrap','saveTaskButton','closeDialogButton','cancelDialogButton',
-    'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineDueTime','routineReminderMinutes','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','routineNextTemplate','routineNextDelay','routineNextDelayWrap','routineAutoGenerate','routineNextRunDate','routineNextRunDateWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
-    'resetButton','themeButton','toast','offlineReady','installButton','installHelp','forceAppUpdateButton','appVersionDisplay','lastForcedUpdate','syncSettingsCard',
+    'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskDueTime','taskDurationMinutes','findFreeSlotsButton','taskScheduleStatus','freeSlotSuggestions','taskReminderMinutes','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','taskNextTemplate','taskNextDelay','taskNextDelayWrap','saveTaskButton','closeDialogButton','cancelDialogButton',
+    'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineDueTime','routineDurationMinutes','routineReminderMinutes','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','routineNextTemplate','routineNextDelay','routineNextDelayWrap','routineAutoGenerate','routineNextRunDate','routineNextRunDateWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
+    'workScheduleDialog','workScheduleForm','workScheduleTitle','workScheduleDays','closeWorkScheduleButton','cancelWorkScheduleButton','resetButton','themeButton','toast','offlineReady','installButton','installHelp','forceAppUpdateButton','appVersionDisplay','lastForcedUpdate','syncSettingsCard',
     'notificationSettingsCard','notificationStatusPill','notificationPermissionStatus','requestNotificationPermissionButton','testNotificationButton','notificationsEnabledToggle','dailySummaryToggle','dailySummaryTime','overdueNotificationToggle','notificationHelpText',
     'syncStateSummary','syncStatusPill','syncEndpoint','syncHouseKey','generateSyncKeyButton','saveSyncConfigButton','testSyncButton','syncConnectedPanel','syncCloudStatus','syncLastSync','syncLastAttempt','syncLastResult','syncDeviceId','createCloudButton','adoptCloudButton','syncNowButton','unlinkCloudButton','autoSyncToggle','syncHelpText','syncProgress','syncProgressBar','syncProgressLabel','syncProgressPercent','syncProgressDetail','exportBackupButton','importBackupButton','importBackupFile'
   ].forEach(id => { els[id] = document.getElementById(id); });
@@ -474,6 +494,16 @@ async function ensureV8Data() {
   await put('settings', { id: 'appVersion', value: APP_VERSION });
 }
 
+
+async function ensureV81Data() {
+  const settings=await getAll('settings'); const [users,tasks,templates]=await Promise.all([getAll('users'),getAll('tasks'),getAll('templates')]);
+  await putMany('users',users.map(user=>({...user,workSchedule:normalizeWorkSchedule(user.workSchedule)})));
+  await putMany('tasks',tasks.map(task=>({...task,durationMinutes:normalizedDuration(task.durationMinutes)})));
+  await putMany('templates',templates.map(template=>({...template,durationMinutes:normalizedDuration(template.durationMinutes)})));
+  if(!settings.some(item=>item.id==='v81-initialized'&&item.value===true))await put('settings',{id:'v81-initialized',value:true,modifiedAt:Date.now()});
+  await put('settings',{id:'appVersion',value:APP_VERSION});
+}
+
 async function loadState() {
   [state.rooms, state.users, state.tasks, state.history, state.settings, state.templates] = await Promise.all([
     getAll('rooms'), getAll('users'), getAll('tasks'), getAll('history'), getAll('settings'), getAll('templates')
@@ -489,11 +519,12 @@ async function loadState() {
   if (roomStructureNeedsRepair) await putMany('rooms', normalizedRooms);
 
   state.rooms.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+  state.users = state.users.map(user => ({ ...user, workSchedule: normalizeWorkSchedule(user.workSchedule) }));
   state.users.sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  state.tasks = state.tasks.map(task => ({ recurrence: 'none', recurrenceDays: null, nextTemplateId: null, nextDelayMinutes: 0, availableAt: null, dueTime: '', reminderMinutes: null, ...task }));
+  state.tasks = state.tasks.map(task => ({ durationMinutes: DEFAULT_TASK_DURATION, recurrence: 'none', recurrenceDays: null, nextTemplateId: null, nextDelayMinutes: 0, availableAt: null, dueTime: '', reminderMinutes: null, ...task }));
   state.tasks.sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999') || b.createdAt - a.createdAt);
   state.history.sort((a, b) => b.completedAt - a.completedAt);
-  state.templates = state.templates.map(template => ({ recurrence: 'none', recurrenceDays: null, priority: 'normal', assigneeId: null, nextTemplateId: null, nextDelayMinutes: 0, autoGenerate: false, nextRunDate: '', dueTime: '', reminderMinutes: null, ...template }));
+  state.templates = state.templates.map(template => ({ durationMinutes: DEFAULT_TASK_DURATION, recurrence: 'none', recurrenceDays: null, priority: 'normal', assigneeId: null, nextTemplateId: null, nextDelayMinutes: 0, autoGenerate: false, nextRunDate: '', dueTime: '', reminderMinutes: null, ...template }));
   state.templates.sort((a, b) => (roomById(a.roomId)?.order ?? 999) - (roomById(b.roomId)?.order ?? 999) || a.title.localeCompare(b.title, 'es'));
 }
 
@@ -518,6 +549,7 @@ async function materializeAutoRoutines() {
         assigneeName: template.assigneeId ? userName(template.assigneeId, '') : undefined,
         dueDate: runDate,
         dueTime: template.dueTime || '',
+        durationMinutes: normalizedDuration(template.durationMinutes),
         reminderMinutes: parseReminderMinutes(template.reminderMinutes),
         priority: template.priority || 'normal',
         recurrence: 'none', recurrenceDays: null,
@@ -527,6 +559,7 @@ async function materializeAutoRoutines() {
         createdAt: Date.now(), modifiedAt: Date.now(),
         autoGenerated: true,
       };
+      if(task.assigneeId){const slot=firstFreeSlotOnDate(task.assigneeId,task.dueDate,task.durationMinutes,task.dueTime);if(slot)task.dueTime=slot.time;else{task.suggestedAssigneeId=task.assigneeId;task.assigneeId=null;task.assigneeName=undefined;task.dueTime='';}}
       await put('tasks', task);
       state.tasks.push(task);
       changed = true;
@@ -741,7 +774,7 @@ function todayTaskMarkup(task, { showDate = false, compact = false } = {}) {
     <button class="today-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}" title="${waiting ? availabilityText(task) : 'Completar'}" ${waiting ? 'disabled' : ''}>${waiting ? '⏳' : '✓'}</button>
     <button class="today-task-open" type="button" title="Editar tarea">
       <span class="today-task-title-line"><strong>${escapeHTML(task.title)}</strong><i class="today-person-avatar" title="${escapeHTML(person)}">${escapeHTML(todayPersonInitial(task))}</i></span>
-      <span>${escapeHTML(room)} · ${escapeHTML(person)}${task.dueTime ? ` · 🕒 ${escapeHTML(task.dueTime)}` : ''}${reminderText(task) ? ` · 🔔 ${escapeHTML(reminderText(task))}` : ''}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}${waiting ? ` · ⏳ ${escapeHTML(availabilityText(task))}` : ''}${nextTemplate ? ` · → ${escapeHTML(nextTemplate.title)}` : ''}</span>
+      <span>${escapeHTML(room)} · ${escapeHTML(person)}${task.dueTime ? ` · 🕒 ${escapeHTML(task.dueTime)}` : ''} · ⏱ ${escapeHTML(durationText(task.durationMinutes))}${reminderText(task) ? ` · 🔔 ${escapeHTML(reminderText(task))}` : ''}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}${waiting ? ` · ⏳ ${escapeHTML(availabilityText(task))}` : ''}${nextTemplate ? ` · → ${escapeHTML(nextTemplate.title)}` : ''}</span>
     </button>
     ${datePart}
     <div class="today-task-actions">
@@ -752,36 +785,13 @@ function todayTaskMarkup(task, { showDate = false, compact = false } = {}) {
   </div>`;
 }
 
-async function postponeTask(id, value = '1') {
-  const task = state.tasks.find(item => item.id === id);
-  if (!task) return;
-  const dueDate = value === 'none' ? '' : addDaysISO(Math.max(1, Number(value) || 1));
-  await put('tasks', { ...task, dueDate, dueTime: value === 'none' ? '' : task.dueTime, reminderMinutes: value === 'none' ? null : task.reminderMinutes, availableAt: null, modifiedAt: Date.now() });
-  await loadState();
-  renderAll();
-  showToast(value === 'none' ? 'Tarea dejada sin fecha' : value === '1' ? 'Tarea pasada a mañana' : `Tarea aplazada ${value} días`);
-  touchCloudDirty();
-}
+async function postponeTask(id,value='1'){const task=state.tasks.find(item=>item.id===id);if(!task)return;const dueDate=value==='none'?'':addDaysISO(Math.max(1,Number(value)||1));let dueTime=value==='none'?'':task.dueTime;if(value!=='none'&&task.assigneeId){const slot=firstFreeSlotOnDate(task.assigneeId,dueDate,task.durationMinutes,dueTime,task.id);if(!slot){showToast('No hay un hueco libre ese día para esta persona');return;}dueTime=slot.time;}await put('tasks',{...task,dueDate,dueTime,reminderMinutes:value==='none'?null:task.reminderMinutes,availableAt:null,modifiedAt:Date.now()});await loadState();renderAll();showToast(value==='none'?'Tarea dejada sin fecha':`Tarea reprogramada · ${dueTime}`);touchCloudDirty();}
 
 async function postponeTaskToTomorrow(id) {
   return postponeTask(id, '1');
 }
 
-async function quickAssignTask(id, assigneeId) {
-  const task = state.tasks.find(item => item.id === id);
-  if (!task) return;
-  const nextId = assigneeId || null;
-  await put('tasks', {
-    ...task,
-    assigneeId: nextId,
-    assigneeName: nextId ? userName(nextId, '') : undefined,
-    modifiedAt: Date.now(),
-  });
-  await loadState();
-  renderAll();
-  showToast(nextId ? `Asignada a ${userName(nextId, '')}` : 'Tarea sin asignar');
-  touchCloudDirty();
-}
+async function quickAssignTask(id,assigneeId){const task=state.tasks.find(item=>item.id===id);if(!task)return;const nextId=assigneeId||null;if(nextId){const start=timeToMinutes(task.dueTime);const check=task.dueDate&&task.dueTime?slotConflicts(nextId,task.dueDate,start,task.durationMinutes,task.id):{ok:false};if(!task.dueDate||!task.dueTime||!check.ok){openTaskDialog(id);els.taskAssignee.value=nextId;validateTaskScheduleForm();showToast('Elige un hueco libre para completar la asignación');return;}}await put('tasks',{...task,assigneeId:nextId,assigneeName:nextId?userName(nextId,''):undefined,modifiedAt:Date.now()});await loadState();renderAll();showToast(nextId?`Asignada a ${userName(nextId,'')}`:'Tarea sin asignar');touchCloudDirty();}
 
 function bindTodaySwipe(row, id) {
   let startX = 0;
@@ -1105,18 +1115,8 @@ function renderHistory() {
   }).join('');
 }
 
-function renderUsers() {
-  if (!state.users.length) {
-    els.userList.innerHTML = '<div class="users-empty">Todavia no hay personas. Anade los miembros de la casa para poder asignar tareas.</div>';
-    return;
-  }
-  els.userList.innerHTML = state.users.map(user => `<div class="user-row" data-user-id="${user.id}">
-    <div class="user-avatar">${escapeHTML(user.name.trim().charAt(0).toUpperCase() || '?')}</div>
-    <div class="user-name">${escapeHTML(user.name)}</div>
-    <button class="user-delete" type="button" aria-label="Eliminar ${escapeHTML(user.name)}" title="Eliminar">×</button>
-  </div>`).join('');
-  els.userList.querySelectorAll('.user-row').forEach(row => row.querySelector('.user-delete').addEventListener('click', () => deleteUser(row.dataset.userId)));
-}
+function workScheduleSummary(user){const schedule=normalizeWorkSchedule(user.workSchedule),active=WORKDAY_LABELS.filter(([key])=>schedule[key].active);if(!active.length)return'Sin horario laboral configurado';const groups=new Map();for(const [key,label] of active){const block=schedule[key],k=`${block.start}-${block.end}`;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(label.slice(0,3));}return[...groups.entries()].map(([hours,days])=>`${days.join(', ')} · ${hours}`).join(' · ');}
+function renderUsers(){if(!state.users.length){els.userList.innerHTML='<div class="users-empty">Todavia no hay personas. Anade los miembros de la casa para poder asignar tareas.</div>';return;}els.userList.innerHTML=state.users.map(user=>`<div class="user-row user-row-v81" data-user-id="${user.id}"><div class="user-avatar">${escapeHTML(user.name.trim().charAt(0).toUpperCase()||'?')}</div><div class="user-name"><strong>${escapeHTML(user.name)}</strong><small>${escapeHTML(workScheduleSummary(user))}</small></div><button class="secondary-button compact-button user-schedule" type="button">Horario</button><button class="user-delete" type="button" aria-label="Eliminar ${escapeHTML(user.name)}" title="Eliminar">×</button></div>`).join('');els.userList.querySelectorAll('.user-row').forEach(row=>{row.querySelector('.user-schedule')?.addEventListener('click',()=>openWorkScheduleDialog(row.dataset.userId));row.querySelector('.user-delete').addEventListener('click',()=>deleteUser(row.dataset.userId));});}
 
 function renderRoomSettings() {
   els.roomSettingsList.innerHTML = state.rooms.map(room => `<label class="room-name-field">
@@ -1151,7 +1151,7 @@ function renderRoutines() {
     return `<article class="routine-card" data-template-id="${template.id}">
       <div class="routine-main">
         <div class="routine-title-row"><strong>${escapeHTML(template.title)}</strong>${template.priority === 'high' ? '<i class="priority-dot" title="Prioridad alta"></i>' : ''}</div>
-        <div class="task-meta"><span>${escapeHTML(room)}</span><span>${escapeHTML(person)}</span>${template.dueTime ? `<span>🕒 ${escapeHTML(template.dueTime)}</span>` : ''}${reminderText(template) ? `<span class="reminder-badge">🔔 ${escapeHTML(reminderText(template))}</span>` : ''}<span class="recurrence-badge">${template.recurrence && template.recurrence !== 'none' ? '↻ ' : ''}${escapeHTML(recurrenceText(template))}</span>${template.autoGenerate ? `<span class="auto-badge">⚡ Auto · ${escapeHTML(formatDate(template.nextRunDate || todayISO()))}</span>` : ''}${template.nextTemplateId && templateById(template.nextTemplateId) ? `<span class="chain-badge">→ ${escapeHTML(templateById(template.nextTemplateId).title)}</span>` : ''}</div>
+        <div class="task-meta"><span>${escapeHTML(room)}</span><span>${escapeHTML(person)}</span>${template.dueTime ? `<span>🕒 ${escapeHTML(template.dueTime)}</span>` : ''}<span>⏱ ${escapeHTML(durationText(template.durationMinutes))}</span>${reminderText(template) ? `<span class="reminder-badge">🔔 ${escapeHTML(reminderText(template))}</span>` : ''}<span class="recurrence-badge">${template.recurrence && template.recurrence !== 'none' ? '↻ ' : ''}${escapeHTML(recurrenceText(template))}</span>${template.autoGenerate ? `<span class="auto-badge">⚡ Auto · ${escapeHTML(formatDate(template.nextRunDate || todayISO()))}</span>` : ''}${template.nextTemplateId && templateById(template.nextTemplateId) ? `<span class="chain-badge">→ ${escapeHTML(templateById(template.nextTemplateId).title)}</span>` : ''}</div>
       </div>
       <div class="routine-actions">
         <button class="secondary-button routine-create" type="button">Crear hoy</button>
@@ -1201,6 +1201,7 @@ function openRoutineDialog(templateId = null) {
     els.routineAssignee.value = template.assigneeId || '';
     els.routinePriority.value = template.priority || 'normal';
     els.routineDueTime.value = template.dueTime || '';
+    els.routineDurationMinutes.value = normalizedDuration(template.durationMinutes);
     els.routineReminderMinutes.value = template.reminderMinutes === null || template.reminderMinutes === undefined ? '' : String(template.reminderMinutes);
     els.routineRecurrence.value = template.recurrence || 'none';
     els.routineRecurrenceDays.value = template.recurrenceDays || 2;
@@ -1214,6 +1215,7 @@ function openRoutineDialog(templateId = null) {
     els.routineForm.reset();
     els.routinePriority.value = 'normal';
     els.routineDueTime.value = '';
+    els.routineDurationMinutes.value = DEFAULT_TASK_DURATION;
     els.routineReminderMinutes.value = '';
     els.routineRecurrence.value = 'weekly';
     els.routineRecurrenceDays.value = 2;
@@ -1245,6 +1247,7 @@ async function saveRoutine(event) {
     assigneeId: els.routineAssignee.value || null,
     priority: els.routinePriority.value,
     dueTime: els.routineDueTime.value || '',
+    durationMinutes: normalizedDuration(els.routineDurationMinutes.value),
     reminderMinutes: els.routineDueTime.value ? parseReminderMinutes(els.routineReminderMinutes.value) : null,
     recurrence: els.routineRecurrence.value,
     recurrenceDays: els.routineRecurrence.value === 'custom' ? Math.max(2, Number(els.routineRecurrenceDays.value) || 2) : null,
@@ -1276,36 +1279,7 @@ async function deleteRoutine(id) {
   touchCloudDirty();
 }
 
-async function createTaskFromTemplate(id) {
-  const template = state.templates.find(item => item.id === id);
-  if (!template) return;
-  const existing = state.tasks.find(task => task.templateId === template.id && !task.completed);
-  if (existing) {
-    els.roomFilter.value = template.roomId;
-    els.statusFilter.value = 'pending';
-    switchView('tasks');
-    renderTasks();
-    showToast('Esta rutina ya tiene una tarea pendiente');
-    return;
-  }
-  await put('tasks', {
-    id: makeId(), templateId: template.id, title: template.title, roomId: template.roomId,
-    assigneeId: template.assigneeId || null,
-    assigneeName: template.assigneeId ? userName(template.assigneeId, '') : undefined,
-    dueDate: todayISO(), dueTime: template.dueTime || '', reminderMinutes: parseReminderMinutes(template.reminderMinutes), priority: template.priority || 'normal',
-    recurrence: template.autoGenerate ? 'none' : (template.recurrence || 'none'), recurrenceDays: template.autoGenerate ? null : (template.recurrenceDays || null),
-    nextTemplateId: template.nextTemplateId || null, nextDelayMinutes: Number(template.nextDelayMinutes || 0),
-    completed: false, createdAt: Date.now(), modifiedAt: Date.now(),
-  });
-  await loadState();
-  els.roomFilter.value = template.roomId;
-  els.statusFilter.value = 'pending';
-  switchView('tasks');
-  renderAll();
-  showToast('Tarea creada desde rutina');
-  touchCloudDirty();
-}
-
+async function createTaskFromTemplate(id){const template=state.templates.find(item=>item.id===id);if(!template)return;const existing=state.tasks.find(task=>task.templateId===template.id&&!task.completed);if(existing){els.roomFilter.value=template.roomId;els.statusFilter.value='pending';switchView('tasks');renderTasks();showToast('Esta rutina ya tiene una tarea pendiente');return;}const task={id:makeId(),templateId:template.id,title:template.title,roomId:template.roomId,assigneeId:template.assigneeId||null,assigneeName:template.assigneeId?userName(template.assigneeId,''):undefined,dueDate:todayISO(),dueTime:template.dueTime||'',durationMinutes:normalizedDuration(template.durationMinutes),reminderMinutes:parseReminderMinutes(template.reminderMinutes),priority:template.priority||'normal',recurrence:template.autoGenerate?'none':(template.recurrence||'none'),recurrenceDays:template.autoGenerate?null:(template.recurrenceDays||null),nextTemplateId:template.nextTemplateId||null,nextDelayMinutes:Number(template.nextDelayMinutes||0),completed:false,createdAt:Date.now(),modifiedAt:Date.now()};if(task.assigneeId){const slot=firstFreeSlotOnDate(task.assigneeId,task.dueDate,task.durationMinutes,task.dueTime);if(slot)task.dueTime=slot.time;else{task.suggestedAssigneeId=task.assigneeId;task.assigneeId=null;task.assigneeName=undefined;task.dueTime='';}}await put('tasks',task);await loadState();els.roomFilter.value=template.roomId;els.statusFilter.value='pending';switchView('tasks');renderAll();showToast(task.assigneeId?`Tarea programada a las ${task.dueTime}`:'Tarea creada pendiente de programar');touchCloudDirty();}
 
 function taskMatchesPlanAssignee(task) {
   const selected = els.planAssigneeFilter.value || 'all';
@@ -1320,102 +1294,9 @@ function formatWeekLabel(start, end) {
   return `${start.getDate()} ${monthName(start)} – ${end.getDate()} ${monthName(end)} ${end.getFullYear()}`;
 }
 
-function planTaskMarkup(task) {
-  const room = roomById(task.roomId)?.name || 'Sin estancia';
-  const person = userName(task.assigneeId, task.assigneeName);
-  const waiting = isWaitingTask(task);
-  return `<div class="plan-task ${task.priority === 'high' ? 'high' : ''}${waiting ? ' waiting' : ''}" data-task-id="${task.id}">
-    <button class="plan-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}" ${waiting ? 'disabled' : ''}>${waiting ? '⏳' : '✓'}</button>
-    <button class="plan-task-open" type="button" title="Editar tarea">
-      <strong>${escapeHTML(task.title)}</strong>
-      <span>${escapeHTML(room)}${task.dueTime ? ` · ${escapeHTML(task.dueTime)}` : ''}</span>
-      <small>${escapeHTML(person)}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}${waiting ? ` · ${escapeHTML(availabilityText(task))}` : ''}</small>
-    </button>
-  </div>`;
-}
-
-function bindPlanTaskEvents(root) {
-  root.querySelectorAll('.plan-task').forEach(row => {
-    const id = row.dataset.taskId;
-    row.querySelector('.plan-task-check')?.addEventListener('click', event => {
-      event.stopPropagation();
-      toggleTask(id);
-    });
-    row.querySelector('.plan-task-open')?.addEventListener('click', () => openTaskDialog(id));
-  });
-}
-
-function renderPlan() {
-  if (!els.weeklyPlanner) return;
-  const start = weekStartForOffset(state.planWeekOffset);
-  const end = addDaysToDate(start, 6);
-  const startISO = localISO(start);
-  const endISO = localISO(end);
-  els.planWeekLabel.textContent = formatWeekLabel(start, end);
-
-  const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-  const days = Array.from({ length: 7 }, (_, index) => addDaysToDate(start, index));
-  els.weeklyPlanner.innerHTML = days.map((date, index) => {
-    const iso = localISO(date);
-    const tasks = state.tasks.filter(task => !task.completed && task.dueDate === iso && taskMatchesPlanAssignee(task));
-    const isToday = iso === todayISO();
-    return `<article class="plan-day card ${isToday ? 'today' : ''}" data-date="${iso}">
-      <div class="plan-day-head">
-        <div><span>${dayNames[index]}</span><strong>${date.getDate()}</strong></div>
-        <button class="plan-add-day" type="button" aria-label="Añadir tarea el ${iso}" title="Nueva tarea">+</button>
-      </div>
-      <div class="plan-day-count">${tasks.length} ${tasks.length === 1 ? 'tarea' : 'tareas'}</div>
-      <div class="plan-day-tasks">${tasks.length ? tasks.map(planTaskMarkup).join('') : '<div class="plan-day-empty">Sin tareas</div>'}</div>
-    </article>`;
-  }).join('');
-
-  els.weeklyPlanner.querySelectorAll('.plan-add-day').forEach(button => button.addEventListener('click', () => {
-    const date = button.closest('.plan-day').dataset.date;
-    openTaskDialog(null, date);
-  }));
-  bindPlanTaskEvents(els.weeklyPlanner);
-
-  const backlog = state.tasks.filter(task => !task.completed && taskMatchesPlanAssignee(task) && (!task.dueDate || task.dueDate < todayISO()));
-  if (!backlog.length) {
-    els.planBacklog.innerHTML = '<div class="planner-empty">No hay tareas vencidas ni sin fecha.</div>';
-  } else {
-    els.planBacklog.innerHTML = backlog.map(task => {
-      const room = roomById(task.roomId)?.name || 'Sin estancia';
-      const dateText = task.dueDate ? `Vencida · ${formatDate(task.dueDate)}` : 'Sin fecha';
-      return `<button class="backlog-row" type="button" data-task-id="${task.id}"><span><strong>${escapeHTML(task.title)}</strong><small>${escapeHTML(room)}</small></span><b>${escapeHTML(dateText)}</b></button>`;
-    }).join('');
-    els.planBacklog.querySelectorAll('.backlog-row').forEach(button => button.addEventListener('click', () => openTaskDialog(button.dataset.taskId)));
-  }
-
-  const thirtyDaysAgo = Date.now() - 30 * 86400000;
-  const workloadRows = state.users.map(user => {
-    const pending = state.tasks.filter(task => !task.completed && task.assigneeId === user.id).length;
-    const week = state.tasks.filter(task => !task.completed && task.assigneeId === user.id && task.dueDate >= startISO && task.dueDate <= endISO).length;
-    const done = state.history.filter(item => item.assigneeId === user.id && item.completedAt >= thirtyDaysAgo).length;
-    return { id: user.id, name: user.name, pending, week, done };
-  });
-  const unassigned = state.tasks.filter(task => !task.completed && !task.assigneeId).length;
-  if (!workloadRows.length && !unassigned) {
-    els.workloadSummary.innerHTML = '<div class="planner-empty">Añade personas para ver el reparto.</div>';
-  } else {
-    const rows = workloadRows.map(item => `<button class="workload-row" type="button" data-user-id="${item.id}">
-      <span class="workload-name"><i>${escapeHTML(item.name.charAt(0).toUpperCase())}</i>${escapeHTML(item.name)}</span>
-      <span><b>${item.week}</b><small>esta semana</small></span>
-      <span><b>${item.pending}</b><small>pendientes</small></span>
-      <span><b>${item.done}</b><small>hechas 30 d</small></span>
-    </button>`).join('');
-    const unassignedRow = unassigned ? `<button class="workload-row unassigned" type="button" data-user-id="unassigned">
-      <span class="workload-name"><i>?</i>Sin asignar</span><span><b>—</b><small>esta semana</small></span><span><b>${unassigned}</b><small>pendientes</small></span><span><b>—</b><small>hechas 30 d</small></span>
-    </button>` : '';
-    els.workloadSummary.innerHTML = rows + unassignedRow;
-    els.workloadSummary.querySelectorAll('.workload-row').forEach(row => row.addEventListener('click', () => {
-      els.assigneeFilter.value = row.dataset.userId;
-      els.statusFilter.value = 'pending';
-      switchView('tasks');
-      renderTasks();
-    }));
-  }
-}
+function scheduleBlockStyle(startMinute,durationMinute){const total=PLAN_END_MINUTES-PLAN_START_MINUTES,top=Math.max(0,(startMinute-PLAN_START_MINUTES)/total*100),height=Math.max(1.2,normalizedDuration(durationMinute)/total*100);return`top:${top.toFixed(4)}%;height:${height.toFixed(4)}%`;}
+function planCalendarTaskMarkup(task,showPerson=false){const start=timeToMinutes(task.dueTime);if(start===null)return'';const duration=normalizedDuration(task.durationMinutes),room=roomById(task.roomId)?.name||'Sin estancia',person=userName(task.assigneeId,task.assigneeName);return`<button class="calendar-task ${task.priority==='high'?'high':''}" style="${scheduleBlockStyle(start,duration)}" type="button" data-task-id="${task.id}" title="${escapeHTML(task.title)} · ${task.dueTime}–${minutesToTime(start+duration)}"><strong>${escapeHTML(task.title)}</strong><span>${escapeHTML(task.dueTime)}–${escapeHTML(minutesToTime(start+duration))} · ${escapeHTML(room)}</span>${showPerson?`<small>${escapeHTML(person)}</small>`:''}</button>`;}
+function renderPlan(){if(!els.weeklyPlanner)return;const start=weekStartForOffset(state.planWeekOffset),end=addDaysToDate(start,6),startISO=localISO(start),endISO=localISO(end);els.planWeekLabel.textContent=formatWeekLabel(start,end);const selected=els.planAssigneeFilter.value,selectedUser=selected&&selected!=='all'&&selected!=='unassigned'?userById(selected):null,dayNames=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'],days=Array.from({length:7},(_,i)=>addDaysToDate(start,i));const hourLabels=Array.from({length:19},(_,i)=>6+i).map(hour=>`<span style="top:${((hour*60-PLAN_START_MINUTES)/(PLAN_END_MINUTES-PLAN_START_MINUTES)*100).toFixed(4)}%">${String(hour).padStart(2,'0')}:00</span>`).join('');const columns=days.map((date,index)=>{const iso=localISO(date),isToday=iso===todayISO(),tasks=state.tasks.filter(task=>!task.completed&&task.dueDate===iso&&task.dueTime&&taskMatchesPlanAssignee(task));let work='';if(selectedUser){const block=workBlockForDate(selectedUser,iso);if(block)work=`<div class="calendar-work" style="${scheduleBlockStyle(block.start,block.end-block.start)}"><strong>Trabajo</strong><span>${minutesToTime(block.start)}–${minutesToTime(block.end)}</span></div>`;}return`<div class="calendar-day-column ${isToday?'today':''}" data-date="${iso}"><div class="calendar-day-header"><span>${dayNames[index]}</span><strong>${date.getDate()}</strong><button class="plan-add-day" type="button" title="Nueva tarea">+</button></div><div class="calendar-day-track">${work}${tasks.map(task=>planCalendarTaskMarkup(task,!selectedUser)).join('')}</div></div>`;}).join('');els.weeklyPlanner.innerHTML=`<div class="schedule-calendar-shell"><div class="calendar-time-axis"><div class="calendar-axis-head"></div><div class="calendar-time-track">${hourLabels}</div></div><div class="calendar-days-grid">${columns}</div></div>`;els.weeklyPlanner.querySelectorAll('.calendar-task').forEach(button=>button.addEventListener('click',()=>openTaskDialog(button.dataset.taskId)));els.weeklyPlanner.querySelectorAll('.plan-add-day').forEach(button=>button.addEventListener('click',()=>{const date=button.closest('.calendar-day-column').dataset.date;openTaskDialog(null,date,selectedUser?.id||null);}));const backlog=state.tasks.filter(task=>!task.completed&&taskMatchesPlanAssignee(task)&&(!task.dueDate||isOverdue(task)||(task.assigneeId&&!task.dueTime)));if(!backlog.length)els.planBacklog.innerHTML='<div class="planner-empty">No hay tareas pendientes de programar.</div>';else{els.planBacklog.innerHTML=backlog.map(task=>{const room=roomById(task.roomId)?.name||'Sin estancia',reason=!task.dueDate?'Sin fecha':(task.assigneeId&&!task.dueTime?'Sin hora':`Vencida · ${formatDate(task.dueDate)}`);return`<button class="backlog-row" type="button" data-task-id="${task.id}"><span><strong>${escapeHTML(task.title)}</strong><small>${escapeHTML(room)} · ${escapeHTML(durationText(task.durationMinutes))}</small></span><b>${escapeHTML(reason)}</b></button>`;}).join('');els.planBacklog.querySelectorAll('.backlog-row').forEach(button=>button.addEventListener('click',()=>openTaskDialog(button.dataset.taskId)));}const thirtyDaysAgo=Date.now()-30*86400000,workloadRows=state.users.map(user=>({id:user.id,name:user.name,pending:state.tasks.filter(task=>!task.completed&&task.assigneeId===user.id).length,week:state.tasks.filter(task=>!task.completed&&task.assigneeId===user.id&&task.dueDate>=startISO&&task.dueDate<=endISO).length,done:state.history.filter(item=>item.assigneeId===user.id&&item.completedAt>=thirtyDaysAgo).length})),unassigned=state.tasks.filter(task=>!task.completed&&!task.assigneeId).length;if(!workloadRows.length&&!unassigned)els.workloadSummary.innerHTML='<div class="planner-empty">Añade personas para ver el reparto.</div>';else{const rows=workloadRows.map(item=>`<button class="workload-row" type="button" data-user-id="${item.id}"><span class="workload-name"><i>${escapeHTML(item.name.charAt(0).toUpperCase())}</i>${escapeHTML(item.name)}</span><span><b>${item.week}</b><small>esta semana</small></span><span><b>${item.pending}</b><small>pendientes</small></span><span><b>${item.done}</b><small>hechas 30 d</small></span></button>`).join(''),unassignedRow=unassigned?`<button class="workload-row unassigned" type="button" data-user-id="unassigned"><span class="workload-name"><i>?</i>Sin asignar</span><span><b>—</b><small>esta semana</small></span><span><b>${unassigned}</b><small>pendientes</small></span><span><b>—</b><small>hechas 30 d</small></span></button>`:'';els.workloadSummary.innerHTML=rows+unassignedRow;els.workloadSummary.querySelectorAll('.workload-row').forEach(row=>row.addEventListener('click',()=>{els.assigneeFilter.value=row.dataset.userId;els.statusFilter.value='pending';switchView('tasks');renderTasks();}));}}
 
 function renderSettings() {
   const houseName = settingValue('houseName', 'Mi casa');
@@ -1444,7 +1325,7 @@ function renderAll() {
   updateAppBadge();
 }
 
-function openTaskDialog(taskId = null, presetDate = null) {
+function openTaskDialog(taskId = null, presetDate = null, presetAssigneeId = null) {
   state.editingTaskId = taskId;
   renderFilters();
   const task = taskId ? state.tasks.find(item => item.id === taskId) : null;
@@ -1458,6 +1339,7 @@ function openTaskDialog(taskId = null, presetDate = null) {
     els.taskAssignee.value = task.assigneeId || '';
     els.taskDueDate.value = task.dueDate || '';
     els.taskDueTime.value = task.dueTime || '';
+    els.taskDurationMinutes.value = normalizedDuration(task.durationMinutes);
     els.taskReminderMinutes.value = task.reminderMinutes === null || task.reminderMinutes === undefined ? '' : String(task.reminderMinutes);
     els.taskPriority.value = task.priority || 'normal';
     els.taskRecurrence.value = task.recurrence || 'none';
@@ -1473,10 +1355,12 @@ function openTaskDialog(taskId = null, presetDate = null) {
     els.taskForm.reset();
     els.taskDueDate.value = presetDate || todayISO();
     els.taskDueTime.value = '';
+    els.taskDurationMinutes.value = DEFAULT_TASK_DURATION;
     els.taskReminderMinutes.value = '';
     els.taskPriority.value = 'normal';
     const todayAssignee = state.view === 'today' ? (els.todayAssigneeFilter?.value || 'all') : 'all';
-    els.taskAssignee.value = todayAssignee !== 'all' && todayAssignee !== 'unassigned' ? todayAssignee : '';
+    const defaultAssignee = presetAssigneeId || (todayAssignee !== 'all' && todayAssignee !== 'unassigned' ? todayAssignee : '');
+    els.taskAssignee.value = defaultAssignee;
     els.taskRecurrence.value = 'none';
     els.taskRecurrenceDays.value = 2;
     els.taskNextTemplate.value = '';
@@ -1486,14 +1370,22 @@ function openTaskDialog(taskId = null, presetDate = null) {
     if (els.roomFilter.value !== 'all') els.taskRoom.value = els.roomFilter.value;
   }
 
+  els.freeSlotSuggestions.hidden = true;
+  validateTaskScheduleForm();
   els.taskDialog.showModal();
   setTimeout(() => els.taskTitle.focus(), 50);
 }
+
+function validateTaskScheduleForm(){if(!els.taskScheduleStatus)return{ok:true};const assigneeId=els.taskAssignee.value||null,date=els.taskDueDate.value||'',time=els.taskDueTime.value||'',duration=normalizedDuration(els.taskDurationMinutes.value);els.taskDurationMinutes.value=duration;if(!assigneeId){els.taskScheduleStatus.className='schedule-status neutral';els.taskScheduleStatus.textContent='Sin responsable: la tarea puede quedar pendiente de programar.';return{ok:true};}if(!date||!time){els.taskScheduleStatus.className='schedule-status warning';els.taskScheduleStatus.textContent='Una tarea asignada necesita fecha y hora.';return{ok:false,reason:'Una tarea asignada necesita fecha y hora.'};}const start=timeToMinutes(time),result=slotConflicts(assigneeId,date,start,duration,state.editingTaskId);els.taskScheduleStatus.className=`schedule-status ${result.ok?'ok':'warning'}`;els.taskScheduleStatus.textContent=result.ok?`Hueco libre · ${time}–${minutesToTime(start+duration)} · ${durationText(duration)}`:result.reason;return result;}
+function renderFreeSlotSuggestions(){const assigneeId=els.taskAssignee.value,duration=normalizedDuration(els.taskDurationMinutes.value);if(!assigneeId){showToast('Selecciona primero una persona');return;}const slots=findFreeSlots(assigneeId,els.taskDueDate.value||todayISO(),duration,{limit:8,maxDays:14,preferredMinute:timeToMinutes(els.taskDueTime.value),excludeTaskId:state.editingTaskId});els.freeSlotSuggestions.hidden=false;els.freeSlotSuggestions.innerHTML=slots.length?`<span class="free-slot-title">Primeros huecos disponibles</span>${slots.map(slot=>`<button class="free-slot-chip" type="button" data-date="${slot.date}" data-time="${slot.time}">${formatDate(slot.date)} · ${slot.time}</button>`).join('')}`:'<span class="schedule-status warning">No se han encontrado huecos en los próximos 14 días.</span>';els.freeSlotSuggestions.querySelectorAll('.free-slot-chip').forEach(button=>button.addEventListener('click',()=>{els.taskDueDate.value=button.dataset.date;els.taskDueTime.value=button.dataset.time;els.freeSlotSuggestions.hidden=true;validateTaskScheduleForm();updateReminderControlAvailability();}));}
 
 async function saveTask(event) {
   event.preventDefault();
   const title = els.taskTitle.value.trim();
   if (!title) return;
+  const scheduleCheck = validateTaskScheduleForm();
+  if (!scheduleCheck.ok) { showToast(scheduleCheck.reason || 'Revisa la planificación'); return; }
+  const durationMinutes = normalizedDuration(els.taskDurationMinutes.value);
 
   if (state.editingTaskId) {
     const existing = state.tasks.find(item => item.id === state.editingTaskId);
@@ -1506,6 +1398,7 @@ async function saveTask(event) {
       assigneeName: els.taskAssignee.value ? userName(els.taskAssignee.value, '') : undefined,
       dueDate: els.taskDueDate.value || '',
       dueTime: els.taskDueTime.value || '',
+      durationMinutes,
       reminderMinutes: els.taskDueTime.value ? parseReminderMinutes(els.taskReminderMinutes.value) : null,
       priority: els.taskPriority.value,
       recurrence: els.taskRecurrence.value,
@@ -1525,6 +1418,7 @@ async function saveTask(event) {
       assigneeName: els.taskAssignee.value ? userName(els.taskAssignee.value, '') : undefined,
       dueDate: els.taskDueDate.value || '',
       dueTime: els.taskDueTime.value || '',
+      durationMinutes,
       reminderMinutes: els.taskDueTime.value ? parseReminderMinutes(els.taskReminderMinutes.value) : null,
       priority: els.taskPriority.value,
       recurrence: els.taskRecurrence.value,
@@ -1567,6 +1461,7 @@ async function createChainedTask(task, completedAt) {
     assigneeName: nextTemplate.assigneeId ? userName(nextTemplate.assigneeId, '') : undefined,
     dueDate: localISO(new Date(availableAt)),
     dueTime: delayMinutes ? localTimeHHMM(new Date(availableAt)) : (nextTemplate.dueTime || ''),
+    durationMinutes: normalizedDuration(nextTemplate.durationMinutes),
     reminderMinutes: parseReminderMinutes(nextTemplate.reminderMinutes),
     availableAt: delayMinutes ? availableAt : null,
     priority: nextTemplate.priority || 'normal',
@@ -1577,6 +1472,7 @@ async function createChainedTask(task, completedAt) {
     createdAt: completedAt,
     modifiedAt: completedAt,
   };
+  if(child.assigneeId){const startDate=localISO(new Date(availableAt)),startMinute=delayMinutes?(new Date(availableAt).getHours()*60+new Date(availableAt).getMinutes()):timeToMinutes(child.dueTime),slot=findFreeSlots(child.assigneeId,startDate,child.durationMinutes,{limit:1,maxDays:14,preferredMinute:startMinute})[0];if(slot){child.dueDate=slot.date;child.dueTime=slot.time;child.availableAt=null;}else{child.suggestedAssigneeId=child.assigneeId;child.assigneeId=null;child.assigneeName=undefined;child.dueTime='';}}
   await remove('sync', `tombstone:tasks:${childId}`);
   await put('tasks', child);
   return child;
@@ -1597,7 +1493,7 @@ async function toggleTask(id) {
       assigneeId: task.assigneeId || null, assigneeName: userName(task.assigneeId, task.assigneeName),
       completedAt, recurring: true, modifiedAt: completedAt,
     });
-    await put('tasks', { ...task, completed: false, completedAt: null, lastCompletedAt: completedAt, dueDate: nextDueDate, modifiedAt: completedAt });
+    let nextTask={...task,completed:false,completedAt:null,lastCompletedAt:completedAt,dueDate:nextDueDate,modifiedAt:completedAt};if(nextTask.assigneeId){const slot=firstFreeSlotOnDate(nextTask.assigneeId,nextDueDate,nextTask.durationMinutes,nextTask.dueTime,nextTask.id);if(slot)nextTask.dueTime=slot.time;else{nextTask.suggestedAssigneeId=nextTask.assigneeId;nextTask.assigneeId=null;nextTask.assigneeName=undefined;nextTask.dueTime='';}}await put('tasks',nextTask);
     await closeTaskNotification(task.id);
     await loadState();
     renderAll();
@@ -1652,13 +1548,16 @@ async function addUser(event) {
     showToast('Ese nombre ya existe');
     return;
   }
-  await put('users', { id: makeId(), name, createdAt: Date.now(), modifiedAt: Date.now() });
+  await put('users', { id: makeId(), name, workSchedule: defaultWorkSchedule(), createdAt: Date.now(), modifiedAt: Date.now() });
   els.newUserName.value = '';
   await loadState();
   renderAll();
   showToast('Persona anadida');
   touchCloudDirty();
 }
+
+function openWorkScheduleDialog(userId){const user=userById(userId);if(!user)return;state.editingWorkUserId=userId;els.workScheduleTitle.textContent=`Horario de ${user.name}`;const schedule=normalizeWorkSchedule(user.workSchedule);els.workScheduleDays.innerHTML=WORKDAY_LABELS.map(([key,label])=>{const block=schedule[key];return`<div class="workday-row" data-day="${key}"><label class="workday-toggle"><input class="workday-active" type="checkbox" ${block.active?'checked':''}/><strong>${label}</strong></label><label><span>Inicio</span><input class="workday-start" type="time" value="${block.start}" step="900" ${block.active?'':'disabled'} /></label><label><span>Fin</span><input class="workday-end" type="time" value="${block.end}" step="900" ${block.active?'':'disabled'} /></label></div>`;}).join('');els.workScheduleDays.querySelectorAll('.workday-row').forEach(row=>{const toggle=row.querySelector('.workday-active'),inputs=[row.querySelector('.workday-start'),row.querySelector('.workday-end')];toggle.addEventListener('change',()=>inputs.forEach(input=>input.disabled=!toggle.checked));});els.workScheduleDialog.showModal();}
+async function saveWorkSchedule(event){event.preventDefault();const user=userById(state.editingWorkUserId);if(!user)return;const schedule=defaultWorkSchedule();for(const row of els.workScheduleDays.querySelectorAll('.workday-row')){const key=row.dataset.day,active=row.querySelector('.workday-active').checked,start=row.querySelector('.workday-start').value,end=row.querySelector('.workday-end').value;if(active&&(timeToMinutes(start)===null||timeToMinutes(end)===null||timeToMinutes(end)<=timeToMinutes(start))){showToast(`Revisa el horario de ${WORKDAY_LABELS.find(([k])=>k===key)?.[1]||key}`);return;}schedule[key]={active,start:start||'08:00',end:end||'17:00'};}await put('users',{...user,workSchedule:schedule,modifiedAt:Date.now()});els.workScheduleDialog.close();state.editingWorkUserId=null;await loadState();renderAll();showToast('Horario guardado');touchCloudDirty();}
 
 async function deleteUser(id) {
   const user = userById(id);
@@ -2972,8 +2871,15 @@ function setupEvents() {
   els.taskForm.addEventListener('submit', saveTask);
   els.taskRecurrence.addEventListener('change', updateCustomRecurrenceVisibility);
   els.taskDueDate?.addEventListener('change', updateReminderControlAvailability);
-  els.taskDueTime?.addEventListener('change', updateReminderControlAvailability);
+  els.taskDueTime?.addEventListener('change', () => { updateReminderControlAvailability(); validateTaskScheduleForm(); });
+  els.taskDueDate?.addEventListener('change', validateTaskScheduleForm);
+  els.taskAssignee?.addEventListener('change', validateTaskScheduleForm);
+  els.taskDurationMinutes?.addEventListener('input', validateTaskScheduleForm);
+  els.findFreeSlotsButton?.addEventListener('click', renderFreeSlotSuggestions);
   els.routineDueTime?.addEventListener('change', updateReminderControlAvailability);
+  els.workScheduleForm?.addEventListener('submit', saveWorkSchedule);
+  els.closeWorkScheduleButton?.addEventListener('click', () => { state.editingWorkUserId=null; els.workScheduleDialog.close(); });
+  els.cancelWorkScheduleButton?.addEventListener('click', () => { state.editingWorkUserId=null; els.workScheduleDialog.close(); });
   els.taskNextTemplate?.addEventListener('change', updateCustomRecurrenceVisibility);
   els.routineRecurrence.addEventListener('change', updateCustomRecurrenceVisibility);
   els.routineNextTemplate?.addEventListener('change', updateCustomRecurrenceVisibility);
@@ -3020,7 +2926,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V8 en este dispositivo?')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V8.1 en este dispositivo?')) return;
     await resetDatabase();
     await ensureV1Data();
     await ensureV2Data();
@@ -3029,13 +2935,14 @@ function setupEvents() {
     await ensureV41Data();
     await ensureV6Data();
     await ensureV8Data();
+    await ensureV81Data();
     await loadState();
     await materializeAutoRoutines();
     els.roomFilter.value = 'all';
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V8 restablecida');
+    showToast('V8.1 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
@@ -3056,6 +2963,7 @@ async function init() {
   await ensureV41Data();
   await ensureV6Data();
   await ensureV8Data();
+  await ensureV81Data();
   await loadState();
   await materializeAutoRoutines();
   renderAll();

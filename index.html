@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V8.0.0</title>
+  <title>HomeTasks V8.1.0</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,7 +19,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V8.0.0 · recordatorios y avisos</p>
+          <p class="subtitle">V8.1.0 · recordatorios y avisos</p>
         </div>
       </div>
       <div class="top-actions">
@@ -160,7 +160,7 @@
           <div>
             <p class="eyebrow">Agenda doméstica</p>
             <h2 id="planTitle">Plan semanal</h2>
-            <p class="section-note">Organiza las tareas por día y revisa el reparto entre las personas de la casa.</p>
+            <p class="section-note">Calendario horario de 06:00 a 24:00. Selecciona una persona para ver sus horas de trabajo, tareas y huecos libres.</p>
           </div>
           <div class="week-actions">
             <button id="planPrevWeek" class="secondary-button compact-button" type="button" aria-label="Semana anterior">‹</button>
@@ -188,8 +188,8 @@
           <article class="card planner-panel">
             <div class="card-header compact">
               <div>
-                <h3>Pendientes fuera de agenda</h3>
-                <p>Vencidas y tareas sin fecha.</p>
+                <h3>Pendientes de programar</h3>
+                <p>Vencidas, sin fecha o asignadas sin hora.</p>
               </div>
             </div>
             <div id="planBacklog" class="plan-backlog"></div>
@@ -327,14 +327,14 @@
               </div>
             </label>
             <div class="setting-row"><span>Estancias</span><strong>10</strong></div>
-            <div class="setting-row"><span>Plano</span><strong>Integrado V8</strong></div>
+            <div class="setting-row"><span>Plano</span><strong>Integrado V8.1</strong></div>
           </article>
 
           <article class="card settings-card users-card">
             <div class="settings-title-row">
               <div>
                 <h3>Personas</h3>
-                <p>Anade los miembros que podran recibir tareas.</p>
+                <p>Anade los miembros y configura sus días y horas de trabajo.</p>
               </div>
             </div>
             <form id="addUserForm" class="inline-form user-add-form">
@@ -356,11 +356,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V8</h3>
+            <h3>Estado de V8.1</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Version</span><strong>8.0.0</strong></div>
+            <div class="setting-row"><span>Version</span><strong>8.1.0</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -471,14 +471,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V8. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V8</button>
+            <p>Restablece HomeTasks a los datos iniciales de V8.1. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V8.1</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">8.0.0</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">8.1.0</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -530,9 +530,18 @@
           <input id="taskDueDate" name="dueDate" type="date" />
         </label>
         <label>
-          <span>Hora (opcional)</span>
-          <input id="taskDueTime" name="dueTime" type="time" />
+          <span>Hora</span>
+          <input id="taskDueTime" name="dueTime" type="time" step="900" />
         </label>
+        <label>
+          <span>Duración estimada</span>
+          <div class="duration-input"><input id="taskDurationMinutes" name="durationMinutes" type="number" min="5" max="480" step="5" value="30" required /><span>min</span></div>
+        </label>
+        <div class="schedule-tools full-width">
+          <button id="findFreeSlotsButton" class="secondary-button" type="button">Buscar huecos libres</button>
+          <span id="taskScheduleStatus" class="schedule-status">Selecciona responsable, fecha y hora para validar la disponibilidad.</span>
+        </div>
+        <div id="freeSlotSuggestions" class="free-slot-suggestions full-width" hidden></div>
         <label>
           <span>Recordatorio</span>
           <select id="taskReminderMinutes" name="reminderMinutes">
@@ -624,7 +633,11 @@
         </label>
         <label>
           <span>Hora habitual (opcional)</span>
-          <input id="routineDueTime" type="time" />
+          <input id="routineDueTime" type="time" step="900" />
+        </label>
+        <label>
+          <span>Duración estimada</span>
+          <div class="duration-input"><input id="routineDurationMinutes" type="number" min="5" max="480" step="5" value="30" required /><span>min</span></div>
         </label>
         <label>
           <span>Recordatorio al crear</span>
@@ -682,6 +695,18 @@
         <button id="cancelRoutineDialogButton" class="secondary-button" type="button">Cancelar</button>
         <button class="primary-button" type="submit">Guardar rutina</button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog id="workScheduleDialog" class="task-dialog work-schedule-dialog">
+    <form id="workScheduleForm" method="dialog">
+      <div class="dialog-header">
+        <div><p class="eyebrow">Disponibilidad personal</p><h2 id="workScheduleTitle">Horario de trabajo</h2></div>
+        <button id="closeWorkScheduleButton" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <p class="section-note">Las franjas de trabajo se consideran no disponibles para tareas domésticas. El plan usa intervalos de 15 minutos entre las 06:00 y las 24:00.</p>
+      <div id="workScheduleDays" class="work-schedule-days"></div>
+      <div class="dialog-actions"><button id="cancelWorkScheduleButton" class="secondary-button" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar horario</button></div>
     </form>
   </dialog>
 
