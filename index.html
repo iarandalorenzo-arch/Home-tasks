@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V5.0.1</title>
+  <title>HomeTasks V5.1.0</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,7 +19,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V5.0.1 · hoy + casa</p>
+          <p class="subtitle">V5.1.0 · experiencia diaria</p>
         </div>
       </div>
       <div class="top-actions">
@@ -71,18 +71,26 @@
           <article class="card today-stat"><span>Sin asignar</span><strong id="todayDashboardUnassigned">0</strong></article>
         </div>
 
-        <div class="today-main-grid">
-          <article class="card today-panel">
+        <p class="today-swipe-hint">En móvil: desliza una tarea a la derecha para completarla y a la izquierda para pasarla a mañana.</p>
+
+        <div class="today-priority-grid">
+          <article class="card today-panel overdue-panel">
             <div class="card-header compact">
-              <div><h3>Pendientes de hoy</h3><p>Lo que toca hacer hoy.</p></div>
+              <div><h3>Vencidas</h3><p>Lo que ya debería estar hecho.</p></div>
+            </div>
+            <div id="todayOverdueList" class="today-task-list"></div>
+          </article>
+          <article class="card today-panel today-focus-panel">
+            <div class="card-header compact">
+              <div><h3>Hoy</h3><p>Las tareas del día.</p></div>
             </div>
             <div id="todayTaskList" class="today-task-list"></div>
           </article>
-          <article class="card today-panel overdue-panel">
+          <article class="card today-panel">
             <div class="card-header compact">
-              <div><h3>Vencidas</h3><p>Tareas que ya deberían estar hechas.</p></div>
+              <div><h3>Sin fecha</h3><p>Pendientes todavía sin planificar.</p></div>
             </div>
-            <div id="todayOverdueList" class="today-task-list"></div>
+            <div id="todayNoDateList" class="today-task-list"></div>
           </article>
         </div>
 
@@ -385,7 +393,7 @@
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">5.0.1</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">5.1.0</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>

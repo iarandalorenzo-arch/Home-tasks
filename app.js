@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '5.0.1';
+const APP_VERSION = '5.1.0';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -13,6 +13,7 @@ const LS_DEVICE_ID = 'hometasks-device-id';
 const LS_LAST_SYNC_ATTEMPT = 'hometasks-sync-last-attempt';
 const LS_LAST_SYNC_RESULT = 'hometasks-sync-last-result';
 const LS_LOCAL_REVISION = 'hometasks-local-revision';
+const LS_TODAY_ASSIGNEE = 'hometasks-today-assignee';
 
 
 const makeId = () => (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
@@ -193,7 +194,7 @@ function cacheElements() {
   [
     'connectionBadge','syncHeaderBadge','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
     'roomFilter','statusFilter','assigneeFilter','taskSearch','taskList','activeRoomHint','newTaskButton',
-    'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayDashboardPending','todayDashboardOverdue','todayDashboardDone','todayDashboardUnassigned','todayTaskList','todayOverdueList','todayTomorrowList','todayRecentHistory',
+    'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayDashboardPending','todayDashboardOverdue','todayDashboardDone','todayDashboardUnassigned','todayTaskList','todayOverdueList','todayNoDateList','todayTomorrowList','todayRecentHistory',
     'historyUserFilter','historyRoomFilter','historyList',
     'routineRoomFilter','routineSearch','routineList','newRoutineButton','templateCount','activeRoutineCount',
     'planPrevWeek','planTodayWeek','planNextWeek','planWeekLabel','planAssigneeFilter','weeklyPlanner','planBacklog','workloadSummary',
@@ -467,7 +468,7 @@ function renderFilters() {
   const selectedRoutineRoom = els.routineRoom.value;
   const selectedRoutineAssignee = els.routineAssignee.value;
   const selectedPlanAssignee = els.planAssigneeFilter.value || 'all';
-  const selectedTodayAssignee = els.todayAssigneeFilter?.value || 'all';
+  const selectedTodayAssignee = localStorage.getItem(LS_TODAY_ASSIGNEE) || els.todayAssigneeFilter?.value || 'all';
 
   const roomOptions = optionMarkup(normalizeRooms(state.rooms), room => room.id, room => room.name);
   const userOptions = optionMarkup(state.users, user => user.id, user => user.name);
@@ -541,18 +542,89 @@ function todayMatchesAssignee(task, selected = els.todayAssigneeFilter?.value ||
   return task.assigneeId === selected;
 }
 
-function todayTaskMarkup(task, { showDate = false } = {}) {
+function todayPersonInitial(task) {
+  const name = userName(task.assigneeId, task.assigneeName);
+  if (!task.assigneeId) return '—';
+  return String(name || '?').trim().charAt(0).toUpperCase() || '?';
+}
+
+function todayAssigneeOptions(task) {
+  const options = [`<option value=""${!task.assigneeId ? ' selected' : ''}>Sin asignar</option>`];
+  for (const user of state.users) {
+    options.push(`<option value="${escapeHTML(user.id)}"${task.assigneeId === user.id ? ' selected' : ''}>${escapeHTML(user.name)}</option>`);
+  }
+  return options.join('');
+}
+
+function todayTaskMarkup(task, { showDate = false, compact = false } = {}) {
   const room = roomById(task.roomId)?.name || 'Sin estancia';
   const person = userName(task.assigneeId, task.assigneeName);
   const datePart = showDate ? `<span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}</span>` : '';
-  return `<div class="today-task-row ${task.priority === 'high' ? 'high' : ''}" data-task-id="${task.id}">
-    <button class="today-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}">✓</button>
+  const canMoveTomorrow = task.dueDate !== addDaysISO(1);
+  return `<div class="today-task-row ${task.priority === 'high' ? 'high' : ''}${compact ? ' compact' : ''}" data-task-id="${task.id}">
+    <button class="today-task-check" type="button" aria-label="Completar ${escapeHTML(task.title)}" title="Completar">✓</button>
     <button class="today-task-open" type="button" title="Editar tarea">
-      <strong>${escapeHTML(task.title)}</strong>
+      <span class="today-task-title-line"><strong>${escapeHTML(task.title)}</strong><i class="today-person-avatar" title="${escapeHTML(person)}">${escapeHTML(todayPersonInitial(task))}</i></span>
       <span>${escapeHTML(room)} · ${escapeHTML(person)}${task.recurrence && task.recurrence !== 'none' ? ' · ↻' : ''}</span>
     </button>
     ${datePart}
+    <div class="today-task-actions">
+      ${canMoveTomorrow ? '<button class="today-quick-action today-task-tomorrow" type="button" title="Pasar a mañana">Mañana</button>' : ''}
+      <label class="today-quick-assignee-wrap" title="Reasignar"><span class="sr-only">Responsable</span><select class="today-quick-assignee" aria-label="Reasignar tarea">${todayAssigneeOptions(task)}</select></label>
+      <button class="today-quick-action today-task-edit" type="button" title="Editar">✎</button>
+    </div>
   </div>`;
+}
+
+async function postponeTaskToTomorrow(id) {
+  const task = state.tasks.find(item => item.id === id);
+  if (!task) return;
+  await put('tasks', { ...task, dueDate: addDaysISO(1), modifiedAt: Date.now() });
+  await loadState();
+  renderAll();
+  showToast('Tarea pasada a mañana');
+  touchCloudDirty();
+}
+
+async function quickAssignTask(id, assigneeId) {
+  const task = state.tasks.find(item => item.id === id);
+  if (!task) return;
+  const nextId = assigneeId || null;
+  await put('tasks', {
+    ...task,
+    assigneeId: nextId,
+    assigneeName: nextId ? userName(nextId, '') : undefined,
+    modifiedAt: Date.now(),
+  });
+  await loadState();
+  renderAll();
+  showToast(nextId ? `Asignada a ${userName(nextId, '')}` : 'Tarea sin asignar');
+  touchCloudDirty();
+}
+
+function bindTodaySwipe(row, id) {
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+  row.addEventListener('touchstart', event => {
+    if (event.target.closest('button, select, label, input')) return;
+    const touch = event.changedTouches?.[0];
+    if (!touch) return;
+    startX = touch.clientX;
+    startY = touch.clientY;
+    tracking = true;
+  }, { passive: true });
+  row.addEventListener('touchend', event => {
+    if (!tracking) return;
+    tracking = false;
+    const touch = event.changedTouches?.[0];
+    if (!touch) return;
+    const dx = touch.clientX - startX;
+    const dy = touch.clientY - startY;
+    if (Math.abs(dx) < 72 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
+    if (dx > 0) toggleTask(id);
+    else postponeTaskToTomorrow(id);
+  }, { passive: true });
 }
 
 function bindTodayTaskEvents(root) {
@@ -564,6 +636,10 @@ function bindTodayTaskEvents(root) {
       toggleTask(id);
     });
     row.querySelector('.today-task-open')?.addEventListener('click', () => openTaskDialog(id));
+    row.querySelector('.today-task-edit')?.addEventListener('click', () => openTaskDialog(id));
+    row.querySelector('.today-task-tomorrow')?.addEventListener('click', () => postponeTaskToTomorrow(id));
+    row.querySelector('.today-quick-assignee')?.addEventListener('change', event => quickAssignTask(id, event.target.value));
+    bindTodaySwipe(row, id);
   });
 }
 
@@ -573,9 +649,11 @@ function renderToday() {
   const today = todayISO();
   const tomorrow = addDaysISO(1);
   const pending = state.tasks.filter(task => !task.completed && todayMatchesAssignee(task, selected));
-  const dueToday = pending.filter(task => task.dueDate === today);
-  const overdue = pending.filter(task => task.dueDate && task.dueDate < today);
-  const tomorrowTasks = pending.filter(task => task.dueDate === tomorrow);
+  const byPriorityThenCreated = (a, b) => (a.priority === b.priority ? 0 : a.priority === 'high' ? -1 : 1) || (a.createdAt || 0) - (b.createdAt || 0);
+  const dueToday = pending.filter(task => task.dueDate === today).sort(byPriorityThenCreated);
+  const overdue = pending.filter(task => task.dueDate && task.dueDate < today).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || byPriorityThenCreated(a, b));
+  const noDate = pending.filter(task => !task.dueDate).sort(byPriorityThenCreated);
+  const tomorrowTasks = pending.filter(task => task.dueDate === tomorrow).sort(byPriorityThenCreated);
   const doneToday = state.history.filter(item => localISO(new Date(item.completedAt)) === today && (selected === 'all' || (selected === 'unassigned' ? !item.assigneeId : item.assigneeId === selected)));
   const unassigned = state.tasks.filter(task => !task.completed && !task.assigneeId && (task.dueDate === today || (task.dueDate && task.dueDate < today))).length;
 
@@ -586,13 +664,15 @@ function renderToday() {
   els.todayDashboardUnassigned.textContent = unassigned;
 
   const renderList = (element, tasks, emptyText, options = {}) => {
+    if (!element) return;
     element.innerHTML = tasks.length ? tasks.map(task => todayTaskMarkup(task, options)).join('') : `<div class="today-empty">${emptyText}</div>`;
     bindTodayTaskEvents(element);
   };
 
-  renderList(els.todayTaskList, dueToday, 'No hay tareas pendientes para hoy.');
   renderList(els.todayOverdueList, overdue, 'No hay tareas vencidas.', { showDate: true });
-  renderList(els.todayTomorrowList, tomorrowTasks.slice(0, 6), 'No hay tareas previstas para mañana.');
+  renderList(els.todayTaskList, dueToday, 'No hay tareas pendientes para hoy.');
+  renderList(els.todayNoDateList, noDate.slice(0, 10), 'No hay tareas sin fecha.');
+  renderList(els.todayTomorrowList, tomorrowTasks.slice(0, 6), 'No hay tareas previstas para mañana.', { compact: true });
 
   const recent = [...state.history]
     .filter(item => selected === 'all' || (selected === 'unassigned' ? !item.assigneeId : item.assigneeId === selected))
@@ -1027,7 +1107,8 @@ function openTaskDialog(taskId = null, presetDate = null) {
     els.taskForm.reset();
     els.taskDueDate.value = presetDate || todayISO();
     els.taskPriority.value = 'normal';
-    els.taskAssignee.value = '';
+    const todayAssignee = state.view === 'today' ? (els.todayAssigneeFilter?.value || 'all') : 'all';
+    els.taskAssignee.value = todayAssignee !== 'all' && todayAssignee !== 'unassigned' ? todayAssignee : '';
     els.taskRecurrence.value = 'none';
     els.taskRecurrenceDays.value = 2;
     updateCustomRecurrenceVisibility();
@@ -2211,7 +2292,7 @@ function setupEvents() {
   els.routineRoomFilter.addEventListener('change', renderRoutines);
   els.routineSearch.addEventListener('input', renderRoutines);
   els.planAssigneeFilter.addEventListener('change', renderPlan);
-  els.todayAssigneeFilter?.addEventListener('change', renderToday);
+  els.todayAssigneeFilter?.addEventListener('change', () => { localStorage.setItem(LS_TODAY_ASSIGNEE, els.todayAssigneeFilter.value); renderToday(); });
   els.planPrevWeek.addEventListener('click', () => { state.planWeekOffset -= 1; renderPlan(); });
   els.planTodayWeek.addEventListener('click', () => { state.planWeekOffset = 0; renderPlan(); });
   els.planNextWeek.addEventListener('click', () => { state.planWeekOffset += 1; renderPlan(); });
