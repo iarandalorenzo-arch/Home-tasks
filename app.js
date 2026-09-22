@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '6.0.1';
+const APP_VERSION = '7.0.0';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -14,6 +14,7 @@ const LS_LAST_SYNC_ATTEMPT = 'hometasks-sync-last-attempt';
 const LS_LAST_SYNC_RESULT = 'hometasks-sync-last-result';
 const LS_LOCAL_REVISION = 'hometasks-local-revision';
 const LS_TODAY_ASSIGNEE = 'hometasks-today-assignee';
+const LS_STATS_PERIOD = 'hometasks-stats-period';
 
 
 const makeId = () => (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
@@ -222,7 +223,7 @@ function cacheElements() {
     'connectionBadge','syncHeaderBadge','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
     'roomFilter','statusFilter','assigneeFilter','taskSearch','taskList','activeRoomHint','newTaskButton',
     'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayDashboardPending','todayDashboardOverdue','todayDashboardDone','todayDashboardUnassigned','todayTaskList','todayOverdueList','todayNoDateList','todayTomorrowList','todayWaitingList','todayRecentHistory',
-    'historyUserFilter','historyRoomFilter','historyList',
+    'statsPeriodFilter','statsCompleted','statsActiveDays','statsPending','statsOverdue','statsPeriodLabel','statsPeople','statsRooms','statsTrend','historyUserFilter','historyRoomFilter','historyList',
     'routineRoomFilter','routineSearch','routineList','newRoutineButton','templateCount','activeRoutineCount',
     'planPrevWeek','planTodayWeek','planNextWeek','planWeekLabel','planAssigneeFilter','weeklyPlanner','planBacklog','workloadSummary',
     'houseNameInput','saveHouseNameButton','addUserForm','newUserName','userList','roomSettingsList','saveRoomNamesButton',
@@ -894,10 +895,36 @@ function renderTasks() {
   });
 }
 
+function statsPeriodDays() {
+  const value = els.statsPeriodFilter?.value || localStorage.getItem(LS_STATS_PERIOD) || '30';
+  if (value === 'all') return null;
+  const days = Number(value);
+  return Number.isFinite(days) && days > 0 ? days : 30;
+}
+
+function periodStartTimestamp(days) {
+  if (!days) return 0;
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+  return start.getTime();
+}
+
+function historyForStatsPeriod() {
+  const days = statsPeriodDays();
+  const start = periodStartTimestamp(days);
+  return state.history.filter(item => Number(item.completedAt || 0) >= start);
+}
+
+function statsPeriodText() {
+  const days = statsPeriodDays();
+  return days ? `Últimos ${days} días` : 'Todo el histórico';
+}
+
 function getFilteredHistory() {
   const user = els.historyUserFilter.value;
   const room = els.historyRoomFilter.value;
-  return state.history.filter(item => {
+  return historyForStatsPeriod().filter(item => {
     if (room !== 'all' && item.roomId !== room) return false;
     if (user === 'unassigned' && item.assigneeId) return false;
     if (user !== 'all' && user !== 'unassigned' && item.assigneeId !== user) return false;
@@ -905,10 +932,112 @@ function getFilteredHistory() {
   });
 }
 
+function buildActivityBuckets(history, periodDaysValue) {
+  const now = new Date();
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  let start;
+  let bucketCount;
+
+  if (periodDaysValue) {
+    start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - (periodDaysValue - 1));
+    bucketCount = periodDaysValue <= 7 ? 7 : periodDaysValue <= 30 ? 6 : 9;
+  } else {
+    const earliest = history.length ? Math.min(...history.map(item => Number(item.completedAt || Date.now()))) : Date.now() - 29 * 86400000;
+    start = new Date(earliest);
+    start.setHours(0, 0, 0, 0);
+    bucketCount = 10;
+  }
+
+  const totalSpan = Math.max(86400000, end.getTime() - start.getTime() + 1);
+  const bucketSpan = totalSpan / bucketCount;
+  const counts = Array(bucketCount).fill(0);
+  history.forEach(item => {
+    const time = Number(item.completedAt || 0);
+    if (time < start.getTime() || time > end.getTime()) return;
+    const index = Math.min(bucketCount - 1, Math.max(0, Math.floor((time - start.getTime()) / bucketSpan)));
+    counts[index] += 1;
+  });
+
+  const labelFor = index => {
+    const bucketStart = new Date(start.getTime() + bucketSpan * index);
+    if (periodDaysValue && periodDaysValue <= 7) {
+      return new Intl.DateTimeFormat('es-ES', { weekday: 'short' }).format(bucketStart).replace('.', '');
+    }
+    return new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short' }).format(bucketStart).replace('.', '');
+  };
+  return counts.map((count, index) => ({ count, label: labelFor(index) }));
+}
+
+function renderActivityStats() {
+  if (!els.statsCompleted) return;
+  const history = historyForStatsPeriod();
+  const total = history.length;
+  const days = statsPeriodDays();
+  const activeDays = new Set(history.map(item => localISO(new Date(Number(item.completedAt || 0))))).size;
+  const pendingTasks = state.tasks.filter(task => !task.completed && !isWaitingTask(task));
+  const overdue = pendingTasks.filter(isOverdue).length;
+
+  els.statsCompleted.textContent = total;
+  els.statsActiveDays.textContent = activeDays;
+  els.statsPending.textContent = pendingTasks.length;
+  els.statsOverdue.textContent = overdue;
+  els.statsPeriodLabel.textContent = statsPeriodText();
+
+  const personRows = state.users.map(user => {
+    const done = history.filter(item => item.assigneeId === user.id).length;
+    const pending = pendingTasks.filter(task => task.assigneeId === user.id).length;
+    const overdueCount = pendingTasks.filter(task => task.assigneeId === user.id && isOverdue(task)).length;
+    return { id: user.id, name: user.name, done, pending, overdue: overdueCount };
+  });
+  const unassignedDone = history.filter(item => !item.assigneeId).length;
+  const unassignedPending = pendingTasks.filter(task => !task.assigneeId).length;
+  const unassignedOverdue = pendingTasks.filter(task => !task.assigneeId && isOverdue(task)).length;
+  if (unassignedDone || unassignedPending) personRows.push({ id: 'unassigned', name: 'Sin asignar', done: unassignedDone, pending: unassignedPending, overdue: unassignedOverdue });
+
+  if (!personRows.length) {
+    els.statsPeople.innerHTML = '<div class="stats-empty">Añade personas para analizar el reparto.</div>';
+  } else {
+    els.statsPeople.innerHTML = personRows.map(item => {
+      const share = total ? Math.round(item.done * 100 / total) : 0;
+      const initial = item.id === 'unassigned' ? '?' : (item.name.trim().charAt(0).toUpperCase() || '?');
+      return `<div class="stats-bar-row">
+        <div class="stats-bar-head"><span class="stats-entity"><i>${escapeHTML(initial)}</i><b>${escapeHTML(item.name)}</b></span><span><strong>${item.done}</strong> hechas · ${share}%</span></div>
+        <div class="stats-bar-track"><span style="width:${Math.max(0, Math.min(100, share))}%"></span></div>
+        <div class="stats-bar-foot"><span>${item.pending} pendientes</span><span class="${item.overdue ? 'danger-text' : ''}">${item.overdue} vencidas</span></div>
+      </div>`;
+    }).join('');
+  }
+
+  els.statsRooms.innerHTML = state.rooms.map(room => {
+    const done = history.filter(item => item.roomId === room.id).length;
+    const pending = pendingTasks.filter(task => task.roomId === room.id).length;
+    const share = total ? Math.round(done * 100 / total) : 0;
+    return `<div class="stats-bar-row room-stat-row">
+      <div class="stats-bar-head"><span class="stats-room-name"><b>${escapeHTML(room.name)}</b></span><span><strong>${done}</strong> hechas · ${share}%</span></div>
+      <div class="stats-bar-track"><span style="width:${Math.max(0, Math.min(100, share))}%"></span></div>
+      <div class="stats-bar-foot"><span>${pending} pendientes ahora</span></div>
+    </div>`;
+  }).join('');
+
+  const buckets = buildActivityBuckets(history, days);
+  const maxCount = Math.max(1, ...buckets.map(bucket => bucket.count));
+  els.statsTrend.innerHTML = buckets.map(bucket => {
+    const height = bucket.count ? Math.max(8, Math.round(bucket.count * 100 / maxCount)) : 3;
+    return `<div class="trend-column" title="${bucket.count} tareas">
+      <div class="trend-value">${bucket.count || ''}</div>
+      <div class="trend-bar-wrap"><span class="trend-bar" style="height:${height}%"></span></div>
+      <div class="trend-label">${escapeHTML(bucket.label)}</div>
+    </div>`;
+  }).join('');
+}
+
 function renderHistory() {
   const history = getFilteredHistory();
   if (history.length === 0) {
-    els.historyList.innerHTML = '<div class="list-empty" style="margin:14px">Todavia no hay actividades completadas para estos filtros.</div>';
+    els.historyList.innerHTML = '<div class="list-empty" style="margin:14px">No hay actividades completadas para este periodo y filtros.</div>';
     return;
   }
 
@@ -1237,6 +1366,7 @@ function renderAll() {
   renderTasks();
   renderPlan();
   renderRoutines();
+  renderActivityStats();
   renderHistory();
   renderSettings();
 }
@@ -2494,6 +2624,7 @@ function setupEvents() {
   [els.roomFilter, els.statusFilter, els.assigneeFilter].forEach(el => el.addEventListener('change', renderTasks));
   els.taskSearch.addEventListener('input', renderTasks);
   [els.historyUserFilter, els.historyRoomFilter].forEach(el => el.addEventListener('change', renderHistory));
+  els.statsPeriodFilter?.addEventListener('change', () => { localStorage.setItem(LS_STATS_PERIOD, els.statsPeriodFilter.value); renderActivityStats(); renderHistory(); });
   els.routineRoomFilter.addEventListener('change', renderRoutines);
   els.routineSearch.addEventListener('input', renderRoutines);
   els.planAssigneeFilter.addEventListener('change', renderPlan);
@@ -2550,7 +2681,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V6 en este dispositivo?')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V7 en este dispositivo?')) return;
     await resetDatabase();
     await ensureV1Data();
     await ensureV2Data();
@@ -2564,7 +2695,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V6 restablecida');
+    showToast('V7 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
@@ -2573,6 +2704,7 @@ function setupEvents() {
 
 async function init() {
   cacheElements();
+  if (els.statsPeriodFilter) els.statsPeriodFilter.value = localStorage.getItem(LS_STATS_PERIOD) || '30';
   setupTheme();
   updateConnection();
   setupEvents();

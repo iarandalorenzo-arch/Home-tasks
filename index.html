@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V6.0.1</title>
+  <title>HomeTasks V7.0.0</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,7 +19,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V6.0.1 · gestión avanzada</p>
+          <p class="subtitle">V7.0.0 · reparto y estadísticas</p>
         </div>
       </div>
       <div class="top-actions">
@@ -238,10 +238,57 @@
       </section>
 
       <section id="view-history" class="view" aria-labelledby="historyTitle">
-        <div class="section-heading">
+        <div class="section-heading activity-heading">
           <div>
-            <p class="eyebrow">Actividad realizada</p>
-            <h2 id="historyTitle">Historico</h2>
+            <p class="eyebrow">Reparto y actividad</p>
+            <h2 id="historyTitle">Actividad</h2>
+            <p class="section-note">Una lectura descriptiva de cómo se distribuyen las tareas, sin puntos ni clasificaciones.</p>
+          </div>
+          <label class="stats-period-filter">
+            <span>Periodo</span>
+            <select id="statsPeriodFilter">
+              <option value="7">7 días</option>
+              <option value="30" selected>30 días</option>
+              <option value="90">90 días</option>
+              <option value="all">Todo</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="activity-kpis">
+          <article class="card activity-kpi"><span>Completadas</span><strong id="statsCompleted">0</strong><small id="statsPeriodLabel">Últimos 30 días</small></article>
+          <article class="card activity-kpi"><span>Días con actividad</span><strong id="statsActiveDays">0</strong><small>con al menos una tarea</small></article>
+          <article class="card activity-kpi"><span>Pendientes activas</span><strong id="statsPending">0</strong><small>ahora mismo</small></article>
+          <article class="card activity-kpi danger"><span>Vencidas</span><strong id="statsOverdue">0</strong><small>requieren atención</small></article>
+        </div>
+
+        <div class="activity-grid">
+          <article class="card activity-panel people-panel">
+            <div class="card-header compact">
+              <div><h3>Reparto por persona</h3><p>Actividad completada en el periodo y carga pendiente actual.</p></div>
+            </div>
+            <div id="statsPeople" class="stats-bars"></div>
+          </article>
+
+          <article class="card activity-panel rooms-panel">
+            <div class="card-header compact">
+              <div><h3>Actividad por estancia</h3><p>Dónde se concentra el trabajo doméstico.</p></div>
+            </div>
+            <div id="statsRooms" class="stats-bars"></div>
+          </article>
+        </div>
+
+        <article class="card activity-panel trend-panel">
+          <div class="card-header compact">
+            <div><h3>Evolución</h3><p>Tareas completadas a lo largo del periodo seleccionado.</p></div>
+          </div>
+          <div id="statsTrend" class="activity-trend" aria-label="Evolución de tareas completadas"></div>
+        </article>
+
+        <div class="section-heading history-detail-heading">
+          <div>
+            <p class="eyebrow">Detalle</p>
+            <h3>Histórico del periodo</h3>
           </div>
         </div>
         <article class="card filter-card history-filter-card">
@@ -280,7 +327,7 @@
               </div>
             </label>
             <div class="setting-row"><span>Estancias</span><strong>10</strong></div>
-            <div class="setting-row"><span>Plano</span><strong>Integrado V5</strong></div>
+            <div class="setting-row"><span>Plano</span><strong>Integrado V7</strong></div>
           </article>
 
           <article class="card settings-card users-card">
@@ -309,18 +356,18 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V5</h3>
+            <h3>Estado de V7</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Version</span><strong>5.0.1</strong></div>
+            <div class="setting-row"><span>Version</span><strong>7.0.0</strong></div>
           </article>
 
           <article id="syncSettingsCard" class="card settings-card sync-card">
             <div class="settings-title-row">
               <div>
                 <h3>Sincronización</h3>
-                <p>Proveedor desacoplado: Google Apps Script transporta los cambios y Google Drive conserva el archivo de la casa. La sincronización robusta de V4.2 se mantiene sin cambios en V5.</p>
+                <p>Proveedor desacoplado: Google Apps Script transporta los cambios y Google Drive conserva el archivo de la casa. La sincronización robusta de V4.2 se mantiene sin cambios en V7.</p>
               </div>
               <span id="syncStatusPill" class="sync-pill">Sin configurar</span>
             </div>
@@ -392,14 +439,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V5. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
+            <p>Restablece HomeTasks a los datos iniciales de V7. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
             <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V5</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">6.0.1</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">7.0.0</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -418,7 +465,7 @@
       <button class="nav-item" data-view="plan" type="button"><span>▦</span><small>Plan</small></button>
       <button class="nav-item" data-view="tasks" type="button"><span>✓</span><small>Tareas</small></button>
       <button class="nav-item" data-view="routines" type="button"><span>↻</span><small>Rutinas</small></button>
-      <button class="nav-item" data-view="history" type="button"><span>◷</span><small>Hist.</small></button>
+      <button class="nav-item" data-view="history" type="button"><span>◷</span><small>Actividad</small></button>
       <button class="nav-item" data-view="settings" type="button"><span>⚙</span><small>Ajustes</small></button>
     </nav>
   </div>

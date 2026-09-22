@@ -646,3 +646,58 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
   .task-postpone { max-width:68px; }
   .today-quick-postpone-wrap select { max-width:72px; }
 }
+
+
+/* V7.0.0 - reparto y estadisticas */
+.activity-heading { align-items:end; }
+.stats-period-filter { width: min(180px, 42vw); }
+.activity-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:12px; }
+.activity-kpi { padding:14px 16px; display:grid; gap:3px; }
+.activity-kpi > span { color:var(--muted); font-size:10px; font-weight:800; }
+.activity-kpi > strong { font-size:30px; line-height:1; letter-spacing:-.04em; }
+.activity-kpi > small { color:var(--muted); font-size:9px; }
+.activity-kpi.danger > strong { color:var(--danger); }
+.activity-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:12px; align-items:start; }
+.activity-panel { padding:15px; min-width:0; }
+.stats-bars { display:grid; gap:11px; }
+.stats-bar-row { min-width:0; padding:9px 10px; border:1px solid var(--border); border-radius:12px; background:var(--surface-2); }
+.stats-bar-head { display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:10px; }
+.stats-bar-head > span:last-child { color:var(--muted); white-space:nowrap; }
+.stats-bar-head strong { color:var(--text); font-size:12px; }
+.stats-entity { display:flex; align-items:center; min-width:0; gap:7px; }
+.stats-entity i { flex:none; width:25px; height:25px; display:grid; place-items:center; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-style:normal; font-size:9px; font-weight:900; border:1px solid color-mix(in srgb, var(--accent) 18%, var(--border)); }
+.stats-entity b, .stats-room-name b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.stats-bar-track { height:7px; margin-top:7px; overflow:hidden; border:1px solid var(--border); border-radius:999px; background:var(--surface); }
+.stats-bar-track > span { display:block; height:100%; border-radius:999px; background:var(--accent); min-width:0; transition:width 180ms ease; }
+.room-stat-row .stats-bar-track > span { background:color-mix(in srgb, var(--success) 72%, var(--accent)); }
+.stats-bar-foot { margin-top:6px; display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:9px; }
+.danger-text { color:var(--danger) !important; }
+.stats-empty { padding:18px 10px; text-align:center; color:var(--muted); font-size:11px; border:1px dashed var(--border); border-radius:12px; }
+.trend-panel { margin-bottom:16px; }
+.activity-trend { height:210px; display:flex; align-items:stretch; gap:8px; padding:12px 4px 2px; overflow-x:auto; }
+.trend-column { min-width:48px; flex:1 1 0; display:grid; grid-template-rows:18px 1fr 24px; align-items:end; text-align:center; }
+.trend-value { min-height:18px; color:var(--muted); font-size:9px; font-weight:800; }
+.trend-bar-wrap { height:145px; display:flex; align-items:end; justify-content:center; border-bottom:1px solid var(--border); }
+.trend-bar { width:min(28px,70%); min-height:3px; display:block; border-radius:7px 7px 2px 2px; background:var(--accent); }
+.trend-label { padding-top:5px; color:var(--muted); font-size:8px; white-space:nowrap; }
+.history-detail-heading { margin-top:18px; margin-bottom:8px; }
+.history-detail-heading h3 { margin:0; font-size:18px; }
+
+@media (max-width:800px) {
+  .activity-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .activity-grid { grid-template-columns:1fr; }
+}
+@media (max-width:520px) {
+  .activity-heading { align-items:stretch; }
+  .activity-heading .stats-period-filter { width:100%; }
+  .activity-kpis { gap:6px; }
+  .activity-kpi { padding:10px 11px; }
+  .activity-kpi > strong { font-size:25px; }
+  .activity-panel { padding:11px; }
+  .stats-bar-row { padding:8px; }
+  .stats-bar-head { gap:6px; }
+  .activity-trend { height:190px; gap:5px; }
+  .trend-column { min-width:42px; }
+  .trend-bar-wrap { height:126px; }
+  .bottom-nav .nav-item small { max-width:54px; overflow:hidden; text-overflow:ellipsis; }
+}
