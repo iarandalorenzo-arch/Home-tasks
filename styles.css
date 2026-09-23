@@ -1009,3 +1009,112 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
 .floor-plan-realistic .floor-label-chip,
 .floor-plan-realistic .count-bubble,
 .floor-plan-realistic .count-number { display: none !important; }
+
+
+/* V10.0.2 - optimización específica para tablets y navegador a pantalla completa */
+.tablet-settings-card .sync-actions { margin-top: 12px; }
+.tablet-quick-fullscreen { font-size: 21px; }
+
+html.tablet-ui { --radius: 16px; }
+html.tablet-ui body { overscroll-behavior-y: contain; }
+html.tablet-ui .app-shell { padding-bottom: 72px; }
+html.tablet-ui .topbar {
+  min-height: 54px;
+  padding: 6px max(9px, env(safe-area-inset-left));
+  gap: 8px;
+  backdrop-filter: none;
+  background: color-mix(in srgb, var(--bg) 97%, transparent);
+}
+html.tablet-ui .app-mark { width: 34px; height: 34px; border-radius: 11px; font-size: 20px; box-shadow: none; }
+html.tablet-ui .topbar h1 { font-size: 16px; }
+html.tablet-ui .topbar .subtitle { display: none; }
+html.tablet-ui .top-actions { gap: 5px; }
+html.tablet-ui .icon-button { width: 35px; height: 35px; border-radius: 11px; font-size: 17px; }
+html.tablet-ui .sync-header-badge { min-height: 34px; padding: 0 9px; font-size: 10px; }
+html.tablet-ui .status-badge { padding: 6px 8px; font-size: 10px; }
+html.tablet-ui .content,
+html.tablet-ui .view:not(#view-today) { width: 100%; max-width: none; }
+html.tablet-ui .content { padding: 10px 9px 12px; }
+html.tablet-ui .section-heading { margin-bottom: 10px; gap: 9px; }
+html.tablet-ui .section-heading h2 { font-size: clamp(25px, 3.2vw, 31px); }
+html.tablet-ui .eyebrow { margin-bottom: 3px; font-size: 9px; }
+html.tablet-ui .section-note { margin-top: 3px; font-size: 10px; }
+html.tablet-ui .card { border-radius: 15px; box-shadow: 0 4px 15px rgba(31,43,55,.055); }
+html.tablet-ui .today-map-card,
+html.tablet-ui .today-plan-card,
+html.tablet-ui .today-unassigned-panel,
+html.tablet-ui .today-summary-card { padding: 10px; }
+html.tablet-ui .today-dashboard-grid { gap: 10px; }
+html.tablet-ui .today-map-card .floor-plan { padding: 5px; border-radius: 12px; }
+html.tablet-ui .today-map-card .floor-plan-realistic svg { max-width: 1240px; }
+html.tablet-ui .today-card-heading { margin-bottom: 6px; }
+html.tablet-ui .today-card-heading h3,
+html.tablet-ui .today-plan-head h3,
+html.tablet-ui .today-unassigned-head h3 { font-size: 15px; }
+html.tablet-ui .today-plan-head,
+html.tablet-ui .today-unassigned-head { margin-bottom: 8px; }
+html.tablet-ui .today-plan-card { min-height: 500px; }
+html.tablet-ui .today-unassigned-panel { min-height: 500px; }
+html.tablet-ui .today-secondary-grid { gap: 10px; margin-top: 10px; }
+html.tablet-ui .today-task-row { padding: 8px; border-radius: 12px; }
+html.tablet-ui .today-task-actions select,
+html.tablet-ui .today-task-actions button { min-height: 34px; }
+html.tablet-ui input,
+html.tablet-ui select { min-height: 38px; border-radius: 10px; }
+html.tablet-ui .primary-button,
+html.tablet-ui .secondary-button { min-height: 38px; }
+html.tablet-ui .bottom-nav {
+  bottom: max(4px, env(safe-area-inset-bottom));
+  width: min(760px, calc(100% - 12px));
+  height: 56px;
+  padding: 5px;
+  border-radius: 17px;
+  backdrop-filter: none;
+  background: color-mix(in srgb, var(--surface) 97%, transparent);
+  box-shadow: 0 8px 25px rgba(20,25,35,.12);
+}
+html.tablet-ui .nav-item { border-radius: 12px; gap: 1px; }
+html.tablet-ui .nav-item span { font-size: 17px; }
+html.tablet-ui .nav-item small { font-size: 9px; }
+html.tablet-ui .settings-grid { gap: 10px; }
+html.tablet-ui .settings-card { padding: 13px; }
+html.tablet-ui .task-dialog,
+html.tablet-ui .work-schedule-dialog { max-height: calc(100dvh - 20px); }
+html.tablet-ui .task-dialog form { max-height: calc(100dvh - 30px); padding: 14px; }
+
+/* El plan semanal entra mejor en una pantalla de 1024 px de ancho. */
+html.tablet-ui .schedule-calendar-shell { grid-template-columns: 48px minmax(880px,1fr); min-width: 928px; }
+html.tablet-ui .calendar-days-grid { grid-template-columns: repeat(7,minmax(118px,1fr)); }
+html.tablet-ui .calendar-day-column { min-width: 118px; }
+html.tablet-ui .calendar-day-header { height: 48px; }
+html.tablet-ui .calendar-axis-head { height: 48px; }
+html.tablet-ui .calendar-day-header strong { font-size: 17px; }
+html.tablet-ui .calendar-day-header span { font-size: 9px; }
+
+/* En horizontal mantenemos el mapa a todo el ancho y Plan + Sin asignar lado a lado. */
+@media (orientation: landscape) and (min-width: 780px) {
+  html.tablet-ui .today-dashboard-grid { grid-template-columns: minmax(0,1.75fr) minmax(250px,.72fr); }
+  html.tablet-ui .today-map-card { grid-column: 1 / -1; grid-row: 1; }
+  html.tablet-ui .today-center-column { grid-column: 1; grid-row: 2; }
+  html.tablet-ui .today-unassigned-panel { grid-column: 2; grid-row: 2; min-height: 500px; }
+}
+
+/* En vertical priorizamos legibilidad y evitamos columnas demasiado estrechas. */
+@media (orientation: portrait) {
+  html.tablet-ui .today-dashboard-grid { grid-template-columns: 1fr; }
+  html.tablet-ui .today-map-card,
+  html.tablet-ui .today-center-column,
+  html.tablet-ui .today-unassigned-panel { grid-column: 1; }
+  html.tablet-ui .today-map-card { grid-row: 1; }
+  html.tablet-ui .today-center-column { grid-row: 2; }
+  html.tablet-ui .today-unassigned-panel { grid-row: 3; min-height: 0; }
+  html.tablet-ui .settings-grid { grid-template-columns: 1fr; }
+}
+
+/* Menos efectos GPU en hardware antiguo. */
+@media (pointer: coarse) {
+  html.tablet-ui .floor-plan-realistic,
+  html.tablet-ui .floor-room-card .room-card-bg,
+  html.tablet-ui .card { transition: none !important; }
+  html.tablet-ui .floor-plan-realistic { box-shadow: inset 0 0 0 1px rgba(108,130,154,.18); }
+}

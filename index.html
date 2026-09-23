@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#f6f7f9" />
   <meta name="color-scheme" content="light dark" />
   <meta name="description" content="HomeTasks - planificador ligero, offline-first y multiusuario" />
@@ -10,7 +13,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V10.0.1</title>
+  <title>HomeTasks V10.0.2</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,12 +22,13 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V10.0.1 · tarjetas interactivas por estancia</p>
+          <p class="subtitle">V10.0.2 · modo tablet y pantalla completa</p>
         </div>
       </div>
       <div class="top-actions">
         <button id="syncHeaderBadge" class="sync-header-badge" type="button" title="Estado de sincronización">Sin nube</button>
         <span id="connectionBadge" class="status-badge" title="Estado de conexion">Local</span>
+        <button id="fullscreenButton" class="icon-button tablet-quick-fullscreen" type="button" aria-label="Pantalla completa" title="Pantalla completa" hidden>⛶</button>
         <button id="themeButton" class="icon-button" type="button" aria-label="Cambiar tema" title="Cambiar tema">◐</button>
       </div>
     </header>
@@ -362,11 +366,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V10.0</h3>
+            <h3>Estado de V10.0.2</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Version</span><strong>9.0.0</strong></div>
+            <div class="setting-row"><span>Versión</span><strong>10.0.2</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -506,16 +510,36 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V10.0. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V10.0</button>
+            <p>Restablece HomeTasks a los datos iniciales de V10.0.2. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V10.0.2</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">9.0.0</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">10.0.2</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
+          </article>
+
+          <article id="tabletSettingsCard" class="card settings-card tablet-settings-card">
+            <div class="settings-title-row">
+              <div>
+                <h3>Modo tablet</h3>
+                <p>Optimiza HomeTasks para pantallas táctiles y permite ocultar la interfaz del navegador cuando el dispositivo lo admita.</p>
+              </div>
+              <span id="tabletStatusPill" class="sync-pill">Normal</span>
+            </div>
+            <label class="switch-row">
+              <input id="tabletModeToggle" type="checkbox" />
+              <span>Optimizar interfaz para tablet</span>
+            </label>
+            <div class="setting-row"><span>Pantalla</span><strong id="tabletViewportStatus">—</strong></div>
+            <div class="setting-row"><span>Pantalla completa</span><strong id="tabletFullscreenStatus">No activa</strong></div>
+            <div class="sync-actions">
+              <button id="tabletFullscreenButton" class="primary-button" type="button">Entrar en pantalla completa</button>
+            </div>
+            <p id="tabletModeHelp" class="setting-help">En la Galaxy Tab puedes dejar activado este modo. Al abrir HomeTasks desde el navegador, pulsa ⛶ para ocultar barras y aprovechar toda la pantalla.</p>
           </article>
 
           <article class="card settings-card">

@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '9.0.0';
+const APP_VERSION = '10.0.2';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -23,6 +23,7 @@ const LS_DAILY_SUMMARY_ENABLED = 'hometasks-daily-summary-enabled';
 const LS_DAILY_SUMMARY_TIME = 'hometasks-daily-summary-time';
 const LS_OVERDUE_NOTIFICATIONS = 'hometasks-overdue-notifications';
 const LS_NOTIFICATION_LOG = 'hometasks-notification-log';
+const LS_TABLET_MODE = 'hometasks-tablet-mode';
 
 
 const makeId = () => (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
@@ -291,7 +292,7 @@ function cacheElements() {
     'houseNameInput','saveHouseNameButton','addUserForm','newUserName','userList','roomSettingsList','saveRoomNamesButton',
     'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskDueTime','taskDurationMinutes','findFreeSlotsButton','taskScheduleStatus','freeSlotSuggestions','taskReminderMinutes','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','taskNextTemplate','taskNextDelay','taskNextDelayWrap','saveTaskButton','closeDialogButton','cancelDialogButton',
     'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineDueTime','routineDurationMinutes','routineReminderMinutes','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','routineNextTemplate','routineNextDelay','routineNextDelayWrap','routineAutoGenerate','routineNextRunDate','routineNextRunDateWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
-    'workScheduleDialog','workScheduleForm','workScheduleTitle','workScheduleDays','closeWorkScheduleButton','cancelWorkScheduleButton','resetButton','themeButton','toast','offlineReady','installButton','installHelp','forceAppUpdateButton','appVersionDisplay','lastForcedUpdate','syncSettingsCard',
+    'workScheduleDialog','workScheduleForm','workScheduleTitle','workScheduleDays','closeWorkScheduleButton','cancelWorkScheduleButton','resetButton','themeButton','fullscreenButton','tabletSettingsCard','tabletStatusPill','tabletModeToggle','tabletViewportStatus','tabletFullscreenStatus','tabletFullscreenButton','tabletModeHelp','toast','offlineReady','installButton','installHelp','forceAppUpdateButton','appVersionDisplay','lastForcedUpdate','syncSettingsCard',
     'notificationSettingsCard','notificationStatusPill','notificationPermissionStatus','requestNotificationPermissionButton','testNotificationButton','notificationsEnabledToggle','dailySummaryToggle','dailySummaryTime','overdueNotificationToggle','notificationHelpText',
     'backupStatusSummary','backupCount','backupLastTime','backupSelect','createBackupNowButton','restoreBackupButton','exportSelectedBackupButton','cleanupBackupsButton','diagnosticOnline','diagnosticStorage','diagnosticCounts','diagnosticTombstones','diagnosticDirty','diagnosticLastSync','runDiagnosticsButton','exportDiagnosticsButton','repairDataButton','cleanupTombstonesButton','syncStateSummary','syncStatusPill','syncEndpoint','syncHouseKey','generateSyncKeyButton','saveSyncConfigButton','testSyncButton','syncConnectedPanel','syncCloudStatus','syncLastSync','syncLastAttempt','syncLastResult','syncDeviceId','createCloudButton','adoptCloudButton','syncNowButton','unlinkCloudButton','autoSyncToggle','syncHelpText','syncProgress','syncProgressBar','syncProgressLabel','syncProgressPercent','syncProgressDetail','exportBackupButton','importBackupButton','importBackupFile'
   ].forEach(id => { els[id] = document.getElementById(id); });
@@ -3152,6 +3153,106 @@ function setupTheme() {
   });
 }
 
+
+function isStandaloneDisplay() {
+  return window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
+function isLikelyTabletDevice() {
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+  const shortSide = Math.min(window.screen?.width || window.innerWidth, window.screen?.height || window.innerHeight);
+  const longSide = Math.max(window.screen?.width || window.innerWidth, window.screen?.height || window.innerHeight);
+  return !!coarse && shortSide >= 600 && longSide >= 800;
+}
+
+function fullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
+}
+
+function fullscreenSupported() {
+  const root = document.documentElement;
+  return !!(root.requestFullscreen || root.webkitRequestFullscreen || root.msRequestFullscreen);
+}
+
+function tabletModeEnabled() {
+  return document.documentElement.classList.contains('tablet-ui');
+}
+
+function updateTabletControls() {
+  const enabled = tabletModeEnabled();
+  const full = !!fullscreenElement();
+  const standalone = isStandaloneDisplay();
+  if (els.tabletModeToggle) els.tabletModeToggle.checked = enabled;
+  if (els.tabletStatusPill) {
+    els.tabletStatusPill.textContent = enabled ? 'Tablet' : 'Normal';
+    els.tabletStatusPill.classList.toggle('ok', enabled);
+  }
+  if (els.tabletViewportStatus) els.tabletViewportStatus.textContent = `${window.innerWidth} × ${window.innerHeight}`;
+  if (els.tabletFullscreenStatus) els.tabletFullscreenStatus.textContent = standalone ? 'App independiente' : (full ? 'Activa' : 'No activa');
+  const buttonText = full ? 'Salir de pantalla completa' : 'Entrar en pantalla completa';
+  if (els.tabletFullscreenButton) {
+    els.tabletFullscreenButton.textContent = buttonText;
+    els.tabletFullscreenButton.disabled = standalone || !fullscreenSupported();
+  }
+  if (els.fullscreenButton) {
+    els.fullscreenButton.hidden = !enabled || standalone || !fullscreenSupported();
+    els.fullscreenButton.textContent = full ? '⛶' : '⛶';
+    els.fullscreenButton.title = full ? 'Salir de pantalla completa' : 'Pantalla completa';
+    els.fullscreenButton.setAttribute('aria-label', els.fullscreenButton.title);
+  }
+  if (els.tabletModeHelp && !fullscreenSupported() && !standalone) {
+    els.tabletModeHelp.textContent = 'Este navegador no expone la API de pantalla completa. El modo tablet compacto seguirá funcionando, pero las barras del navegador no pueden ocultarse desde HomeTasks.';
+  }
+}
+
+function applyTabletMode(enabled, { persist = true } = {}) {
+  document.documentElement.classList.toggle('tablet-ui', !!enabled);
+  document.body?.classList.toggle('tablet-ui', !!enabled);
+  if (persist) localStorage.setItem(LS_TABLET_MODE, enabled ? '1' : '0');
+  updateTabletControls();
+}
+
+async function toggleFullscreenMode() {
+  if (isStandaloneDisplay()) {
+    showToast('HomeTasks ya se está ejecutando como aplicación');
+    return;
+  }
+  if (!fullscreenSupported()) {
+    showToast('Pantalla completa no disponible en este navegador');
+    return;
+  }
+  try {
+    if (fullscreenElement()) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+      if (exit) await exit.call(document);
+    } else {
+      const root = document.documentElement;
+      const request = root.requestFullscreen || root.webkitRequestFullscreen || root.msRequestFullscreen;
+      try {
+        await request.call(root, { navigationUI: 'hide' });
+      } catch (_) {
+        await request.call(root);
+      }
+    }
+  } catch (error) {
+    console.warn('No se pudo cambiar el modo de pantalla completa:', error);
+    showToast('El navegador no ha permitido la pantalla completa');
+  } finally {
+    setTimeout(updateTabletControls, 60);
+  }
+}
+
+function setupTabletMode() {
+  const saved = localStorage.getItem(LS_TABLET_MODE);
+  const enabled = saved === null ? isLikelyTabletDevice() : saved === '1';
+  applyTabletMode(enabled, { persist: saved !== null });
+  if (saved === null && enabled) localStorage.setItem(LS_TABLET_MODE, '1');
+  ['fullscreenchange','webkitfullscreenchange','MSFullscreenChange'].forEach(name => document.addEventListener(name, updateTabletControls));
+  window.addEventListener('resize', updateTabletControls);
+  window.addEventListener('orientationchange', () => setTimeout(updateTabletControls, 120));
+  updateTabletControls();
+}
+
 function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add('show');
@@ -3262,6 +3363,9 @@ function setupEvents() {
     localStorage.setItem(LS_AUTO_SYNC, els.autoSyncToggle.checked ? '1' : '0');
     renderSyncPanel();
   });
+  els.tabletModeToggle?.addEventListener('change', () => applyTabletMode(els.tabletModeToggle.checked));
+  els.tabletFullscreenButton?.addEventListener('click', toggleFullscreenMode);
+  els.fullscreenButton?.addEventListener('click', toggleFullscreenMode);
   els.requestNotificationPermissionButton?.addEventListener('click', requestNotificationPermission);
   els.testNotificationButton?.addEventListener('click', testNotification);
   els.notificationsEnabledToggle?.addEventListener('change', saveNotificationPreferences);
@@ -3283,7 +3387,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.2 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3300,7 +3404,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V10.0 restablecida');
+    showToast('V10.0.2 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
@@ -3311,6 +3415,7 @@ async function init() {
   cacheElements();
   if (els.statsPeriodFilter) els.statsPeriodFilter.value = localStorage.getItem(LS_STATS_PERIOD) || '30';
   setupTheme();
+  setupTabletMode();
   updateConnection();
   setupEvents();
   setupInstallPrompt();
