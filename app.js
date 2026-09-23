@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '8.3.1';
+const APP_VERSION = '9.0.0';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -12,6 +12,9 @@ const LS_CLOUD_DIRTY = 'hometasks-sync-dirty';
 const LS_DEVICE_ID = 'hometasks-device-id';
 const LS_LAST_SYNC_ATTEMPT = 'hometasks-sync-last-attempt';
 const LS_LAST_SYNC_RESULT = 'hometasks-sync-last-result';
+const LS_LAST_AUTO_BACKUP = 'hometasks-v9-last-auto-backup';
+const AUTO_BACKUP_RETENTION = 7;
+const TOMBSTONE_RETENTION_DAYS = 180;
 const LS_LOCAL_REVISION = 'hometasks-local-revision';
 const LS_TODAY_ASSIGNEE = 'hometasks-today-assignee';
 const LS_STATS_PERIOD = 'hometasks-stats-period';
@@ -289,7 +292,7 @@ function cacheElements() {
     'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineDueTime','routineDurationMinutes','routineReminderMinutes','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','routineNextTemplate','routineNextDelay','routineNextDelayWrap','routineAutoGenerate','routineNextRunDate','routineNextRunDateWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
     'workScheduleDialog','workScheduleForm','workScheduleTitle','workScheduleDays','closeWorkScheduleButton','cancelWorkScheduleButton','resetButton','themeButton','toast','offlineReady','installButton','installHelp','forceAppUpdateButton','appVersionDisplay','lastForcedUpdate','syncSettingsCard',
     'notificationSettingsCard','notificationStatusPill','notificationPermissionStatus','requestNotificationPermissionButton','testNotificationButton','notificationsEnabledToggle','dailySummaryToggle','dailySummaryTime','overdueNotificationToggle','notificationHelpText',
-    'syncStateSummary','syncStatusPill','syncEndpoint','syncHouseKey','generateSyncKeyButton','saveSyncConfigButton','testSyncButton','syncConnectedPanel','syncCloudStatus','syncLastSync','syncLastAttempt','syncLastResult','syncDeviceId','createCloudButton','adoptCloudButton','syncNowButton','unlinkCloudButton','autoSyncToggle','syncHelpText','syncProgress','syncProgressBar','syncProgressLabel','syncProgressPercent','syncProgressDetail','exportBackupButton','importBackupButton','importBackupFile'
+    'backupStatusSummary','backupCount','backupLastTime','backupSelect','createBackupNowButton','restoreBackupButton','exportSelectedBackupButton','cleanupBackupsButton','diagnosticOnline','diagnosticStorage','diagnosticCounts','diagnosticTombstones','diagnosticDirty','diagnosticLastSync','runDiagnosticsButton','exportDiagnosticsButton','repairDataButton','cleanupTombstonesButton','syncStateSummary','syncStatusPill','syncEndpoint','syncHouseKey','generateSyncKeyButton','saveSyncConfigButton','testSyncButton','syncConnectedPanel','syncCloudStatus','syncLastSync','syncLastAttempt','syncLastResult','syncDeviceId','createCloudButton','adoptCloudButton','syncNowButton','unlinkCloudButton','autoSyncToggle','syncHelpText','syncProgress','syncProgressBar','syncProgressLabel','syncProgressPercent','syncProgressDetail','exportBackupButton','importBackupButton','importBackupFile'
   ].forEach(id => { els[id] = document.getElementById(id); });
 }
 
@@ -1526,6 +1529,8 @@ function renderSettings() {
   if (els.lastForcedUpdate) els.lastForcedUpdate.textContent = formatSyncTime(localStorage.getItem('hometasks-last-forced-update'));
   renderNotificationSettings();
   renderSyncPanel();
+  renderBackupPanel();
+  renderDiagnostics();
 }
 
 function renderAll() {
@@ -2105,6 +2110,7 @@ async function importLocalBackup(file) {
   try {
     const snapshot = validateSnapshot(JSON.parse(await file.text()));
     if (!confirm('¿Restaurar esta copia? Los datos locales actuales serán sustituidos.')) return;
+    await createLocalCheckpoint('before-import', { quiet: true });
     await applySnapshot(snapshot, { replace: true });
     await loadState();
     renderAll();
@@ -2116,6 +2122,131 @@ async function importLocalBackup(file) {
   } finally {
     els.importBackupFile.value = '';
   }
+}
+
+
+async function createLocalCheckpoint(reason = 'manual', { quiet = false } = {}) {
+  const snapshot = await buildSyncSnapshot();
+  const now = Date.now();
+  const id = `backup:${now}:${Math.random().toString(36).slice(2,7)}`;
+  await put('backups', { id, createdAt: now, reason, appVersion: APP_VERSION, snapshot });
+  const all = (await getAll('backups')).sort((a,b) => Number(b.createdAt||0)-Number(a.createdAt||0));
+  for (const old of all.slice(AUTO_BACKUP_RETENTION)) await remove('backups', old.id);
+  localStorage.setItem(LS_LAST_AUTO_BACKUP, String(now));
+  await renderBackupPanel();
+  if (!quiet) showToast('Copia de seguridad creada');
+  return id;
+}
+
+function backupReasonLabel(reason) {
+  const labels = { automatic: 'Automática', manual: 'Manual', 'before-import': 'Antes de importar', 'before-reset': 'Antes de restablecer', 'before-cloud-adopt': 'Antes de usar nube' };
+  return labels[reason] || reason || 'Copia';
+}
+
+async function renderBackupPanel() {
+  if (!els.backupSelect) return;
+  const all = (await getAll('backups')).sort((a,b) => Number(b.createdAt||0)-Number(a.createdAt||0));
+  els.backupCount.textContent = String(all.length);
+  els.backupLastTime.textContent = all[0]?.createdAt ? formatSyncTime(all[0].createdAt) : 'Nunca';
+  els.backupStatusSummary.textContent = all.length ? `${all.length} copia${all.length===1?'':'s'} local${all.length===1?'':'es'}` : 'Sin copias';
+  els.backupSelect.innerHTML = all.length
+    ? all.map(item => `<option value="${escapeHTML(item.id)}">${escapeHTML(formatSyncTime(item.createdAt))} · ${escapeHTML(backupReasonLabel(item.reason))} · V${escapeHTML(item.appVersion||'?')}</option>`).join('')
+    : '<option value="">No hay copias disponibles</option>';
+  els.restoreBackupButton.disabled = !all.length;
+  els.exportSelectedBackupButton.disabled = !all.length;
+  els.cleanupBackupsButton.disabled = all.length <= 1;
+}
+
+async function restoreSelectedBackup() {
+  const id = els.backupSelect?.value;
+  if (!id) return;
+  const item = (await getAll('backups')).find(x => x.id === id);
+  if (!item?.snapshot) return showToast('Copia no encontrada');
+  if (!confirm(`¿Restaurar la copia de ${formatSyncTime(item.createdAt)}? Se creará antes una copia del estado actual.`)) return;
+  await createLocalCheckpoint('manual', { quiet: true });
+  await applySnapshot(validateSnapshot(item.snapshot), { replace: true });
+  await loadState(); renderAll(); touchCloudDirty();
+  showToast('Copia restaurada');
+}
+
+async function exportSelectedBackup() {
+  const id = els.backupSelect?.value;
+  const item = (await getAll('backups')).find(x => x.id === id);
+  if (!item?.snapshot) return showToast('Copia no encontrada');
+  const stamp = new Date(item.createdAt).toISOString().slice(0,19).replace(/[:T]/g,'-');
+  downloadSnapshot(item.snapshot, `HomeTasks_backup_${stamp}.json`);
+}
+
+async function cleanupOldBackups() {
+  const all = (await getAll('backups')).sort((a,b) => Number(b.createdAt||0)-Number(a.createdAt||0));
+  if (all.length <= 1) return;
+  if (!confirm('¿Conservar solo la copia local más reciente en este dispositivo?')) return;
+  for (const item of all.slice(1)) await remove('backups', item.id);
+  await renderBackupPanel(); showToast('Copias antiguas eliminadas');
+}
+
+async function ensureAutomaticBackup() {
+  const last = Number(localStorage.getItem(LS_LAST_AUTO_BACKUP) || 0);
+  if (Date.now() - last < 20 * 60 * 60 * 1000) { await renderBackupPanel(); return; }
+  try { await createLocalCheckpoint('automatic', { quiet: true }); } catch (e) { console.warn('Copia automática no disponible:', e); }
+}
+
+async function collectDiagnostics() {
+  const [rooms, users, tasks, history, templates, syncEntries, backups] = await Promise.all([
+    getAll('rooms'), getAll('users'), getAll('tasks'), getAll('history'), getAll('templates'), getAll('sync'), getAll('backups')
+  ]);
+  let storage = null;
+  try { if (navigator.storage?.estimate) storage = await navigator.storage.estimate(); } catch (_) {}
+  const tombstones = syncEntries.filter(x => x?.kind === 'tombstone');
+  return {
+    generatedAt: Date.now(), appVersion: APP_VERSION, online: navigator.onLine,
+    sync: { configured: syncConfigured(), linked: syncLinked(), dirty: localStorage.getItem(LS_CLOUD_DIRTY)==='1', lastSync: localStorage.getItem(LS_LAST_SYNC), lastAttempt: localStorage.getItem(LS_LAST_SYNC_ATTEMPT), lastResult: readSyncResult() },
+    counts: { rooms: rooms.length, users: users.length, tasks: tasks.length, pendingTasks: tasks.filter(t=>!t.completed).length, history: history.length, templates: templates.length, tombstones: tombstones.length, backups: backups.length },
+    storage: storage ? { usage: storage.usage || 0, quota: storage.quota || 0 } : null,
+    deviceId: getDeviceId()
+  };
+}
+
+function formatBytes(n) {
+  const value = Number(n||0); if (value < 1024) return `${value} B`; if (value < 1024**2) return `${(value/1024).toFixed(1)} KB`; return `${(value/1024**2).toFixed(1)} MB`;
+}
+
+async function renderDiagnostics() {
+  if (!els.diagnosticCounts) return;
+  const d = await collectDiagnostics();
+  els.diagnosticOnline.textContent = d.online ? 'Online' : 'Offline';
+  els.diagnosticCounts.textContent = `${d.counts.tasks} tareas · ${d.counts.history} histórico · ${d.counts.templates} rutinas`;
+  els.diagnosticTombstones.textContent = String(d.counts.tombstones);
+  els.diagnosticDirty.textContent = d.sync.dirty ? 'Sí' : 'No';
+  els.diagnosticLastSync.textContent = d.sync.lastSync ? formatSyncTime(d.sync.lastSync) : 'Nunca';
+  els.diagnosticStorage.textContent = d.storage ? `${formatBytes(d.storage.usage)} / ${formatBytes(d.storage.quota)}` : 'No disponible';
+}
+
+async function exportDiagnostics() {
+  const d = await collectDiagnostics();
+  const blob = new Blob([JSON.stringify(d, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=`HomeTasks_diagnostico_${todayISO()}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+  showToast('Diagnóstico exportado');
+}
+
+async function repairLocalData() {
+  if (!confirm('¿Ejecutar una reparación no destructiva? Se creará una copia antes de revisar estructura, estancias y rutinas.')) return;
+  await createLocalCheckpoint('manual', { quiet: true });
+  await ensureV1Data(); await ensureV2Data(); await ensureV3Data(); await ensureV4Data(); await ensureV41Data(); await ensureV6Data(); await ensureV8Data(); await ensureV81Data();
+  await loadState(); await materializeAutoRoutines(); renderAll(); await renderDiagnostics();
+  showToast('Reparación terminada');
+}
+
+async function cleanupOldTombstones() {
+  const entries = await getAll('sync');
+  const cutoff = Date.now() - TOMBSTONE_RETENTION_DAYS * 86400000;
+  const old = entries.filter(x => x?.kind === 'tombstone' && Number(x.deletedAt||0) < cutoff);
+  if (!old.length) return showToast('No hay borrados antiguos que limpiar');
+  if (!confirm(`Se eliminarán ${old.length} marcas de borrado con más de ${TOMBSTONE_RETENTION_DAYS} días. Hazlo solo si todos tus dispositivos se han sincronizado recientemente. ¿Continuar?`)) return;
+  await createLocalCheckpoint('manual', { quiet: true });
+  for (const item of old) await remove('sync', item.id);
+  touchCloudDirty(); await renderDiagnostics(); showToast(`${old.length} marcas antiguas eliminadas`);
 }
 
 function sleep(ms) {
@@ -2541,6 +2672,7 @@ async function adoptCloudData() {
     renderSyncPanel();
 
     const provider = activeSyncProvider();
+    await createLocalCheckpoint('before-cloud-adopt', { quiet: true });
     const localBackup = await buildSyncSnapshot();
 
     // On some Android PWAs a programmatic download may be blocked. The backup is
@@ -3140,12 +3272,21 @@ function setupEvents() {
   els.overdueNotificationToggle?.addEventListener('change', saveNotificationPreferences);
 
   els.exportBackupButton.addEventListener('click', exportLocalBackup);
+  els.createBackupNowButton?.addEventListener('click', () => createLocalCheckpoint('manual'));
+  els.restoreBackupButton?.addEventListener('click', restoreSelectedBackup);
+  els.exportSelectedBackupButton?.addEventListener('click', exportSelectedBackup);
+  els.cleanupBackupsButton?.addEventListener('click', cleanupOldBackups);
+  els.runDiagnosticsButton?.addEventListener('click', async () => { await renderDiagnostics(); showToast('Diagnóstico actualizado'); });
+  els.exportDiagnosticsButton?.addEventListener('click', exportDiagnostics);
+  els.repairDataButton?.addEventListener('click', repairLocalData);
+  els.cleanupTombstonesButton?.addEventListener('click', cleanupOldTombstones);
   els.importBackupButton.addEventListener('click', () => els.importBackupFile.click());
   els.importBackupFile.addEventListener('change', () => importLocalBackup(els.importBackupFile.files?.[0]));
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V8.1 en este dispositivo?')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V9.0 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
     await ensureV2Data();
@@ -3161,7 +3302,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V8.1 restablecida');
+    showToast('V9.0 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
@@ -3186,6 +3327,8 @@ async function init() {
   await loadState();
   await materializeAutoRoutines();
   renderAll();
+  await ensureAutomaticBackup();
+  await renderDiagnostics();
   setupAutoSync();
   setInterval(() => { if (state.tasks.some(task => isWaitingTask(task))) renderAll(); }, 60000);
   await setupServiceWorker();

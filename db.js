@@ -1,6 +1,6 @@
 const DB_NAME = 'hometasks-v0';
-const DB_VERSION = 4;
-const STORES = ['rooms', 'tasks', 'history', 'settings', 'users', 'templates', 'sync'];
+const DB_VERSION = 5;
+const STORES = ['rooms', 'tasks', 'history', 'settings', 'users', 'templates', 'sync', 'backups'];
 
 function requestToPromise(request) {
   return new Promise((resolve, reject) => {
@@ -84,5 +84,8 @@ export async function clearStore(storeName) {
 }
 
 export async function resetDatabase() {
-  for (const store of STORES) await clearStore(store);
+  for (const store of STORES) {
+    if (store === 'backups') continue;
+    await clearStore(store);
+  }
 }

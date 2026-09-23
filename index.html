@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V8.3.1</title>
+  <title>HomeTasks V9.0.0</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,7 +19,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V8.3.1 · mapa ampliado y plan legible</p>
+          <p class="subtitle">V9.0.0 · robustez, copias y diagnóstico</p>
         </div>
       </div>
       <div class="top-actions">
@@ -333,7 +333,7 @@
             </label>
             <div class="setting-row"><span>Estancias domésticas</span><strong>10</strong></div>
             <div class="setting-row"><span>Ubicación general</span><strong>NA / Fuera de casa</strong></div>
-            <div class="setting-row"><span>Plano</span><strong>Integrado V8.1</strong></div>
+            <div class="setting-row"><span>Plano</span><strong>Integrado V8.3</strong></div>
           </article>
 
           <article class="card settings-card users-card">
@@ -362,11 +362,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V8.2</h3>
+            <h3>Estado de V9.0</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Version</span><strong>8.3.1</strong></div>
+            <div class="setting-row"><span>Version</span><strong>9.0.0</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -466,25 +466,54 @@
           </article>
 
           <article class="card settings-card backup-card">
-            <h3>Copia local</h3>
-            <p>Exporta una copia completa en JSON o restaura una copia anterior. Es independiente del proveedor de sincronización.</p>
+            <div class="settings-title-row">
+              <div><h3>Copias de seguridad</h3><p>V9 conserva automáticamente copias locales rotatorias en este dispositivo y mantiene la exportación JSON.</p></div>
+              <span id="backupStatusSummary" class="sync-pill">Comprobando</span>
+            </div>
+            <div class="setting-row"><span>Copias locales</span><strong id="backupCount">0</strong></div>
+            <div class="setting-row"><span>Última copia</span><strong id="backupLastTime">Nunca</strong></div>
+            <label class="full-setting-field"><span>Punto de restauración</span><select id="backupSelect"><option>Comprobando…</option></select></label>
             <div class="sync-actions">
-              <button id="exportBackupButton" class="secondary-button" type="button">Exportar copia</button>
-              <button id="importBackupButton" class="secondary-button" type="button">Importar copia</button>
+              <button id="createBackupNowButton" class="primary-button" type="button">Crear copia ahora</button>
+              <button id="restoreBackupButton" class="secondary-button" type="button">Restaurar seleccionada</button>
+              <button id="exportSelectedBackupButton" class="secondary-button" type="button">Exportar seleccionada</button>
+              <button id="cleanupBackupsButton" class="secondary-button" type="button">Limpiar antiguas</button>
+            </div>
+            <div class="sync-actions backup-json-actions">
+              <button id="exportBackupButton" class="secondary-button" type="button">Exportar estado actual JSON</button>
+              <button id="importBackupButton" class="secondary-button" type="button">Importar JSON</button>
               <input id="importBackupFile" type="file" accept="application/json,.json" hidden />
             </div>
+            <p class="setting-help">Se conserva un máximo de 7 puntos de restauración locales. Antes de importar, restablecer o reparar se crea una copia adicional.</p>
+          </article>
+
+          <article class="card settings-card diagnostics-card">
+            <div class="settings-title-row"><div><h3>Diagnóstico y mantenimiento</h3><p>Comprueba el estado local y de sincronización sin enviar información fuera del dispositivo.</p></div></div>
+            <div class="setting-row"><span>Conexión</span><strong id="diagnosticOnline">—</strong></div>
+            <div class="setting-row"><span>Datos</span><strong id="diagnosticCounts">—</strong></div>
+            <div class="setting-row"><span>Almacenamiento</span><strong id="diagnosticStorage">—</strong></div>
+            <div class="setting-row"><span>Marcas de borrado</span><strong id="diagnosticTombstones">—</strong></div>
+            <div class="setting-row"><span>Cambios pendientes de nube</span><strong id="diagnosticDirty">—</strong></div>
+            <div class="setting-row"><span>Última sincronización</span><strong id="diagnosticLastSync">—</strong></div>
+            <div class="sync-actions">
+              <button id="runDiagnosticsButton" class="primary-button" type="button">Actualizar diagnóstico</button>
+              <button id="exportDiagnosticsButton" class="secondary-button" type="button">Exportar diagnóstico</button>
+              <button id="repairDataButton" class="secondary-button" type="button">Reparar datos</button>
+              <button id="cleanupTombstonesButton" class="secondary-button" type="button">Limpiar borrados antiguos</button>
+            </div>
+            <p class="setting-help">La limpieza de borrados solo afecta a marcas de más de 180 días. Úsala cuando todos los dispositivos habituales se hayan sincronizado recientemente.</p>
           </article>
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V8.2. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V8.2</button>
+            <p>Restablece HomeTasks a los datos iniciales de V9.0. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V9.0</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">8.3.1</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">9.0.0</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
