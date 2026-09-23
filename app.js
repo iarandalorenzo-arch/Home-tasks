@@ -133,16 +133,16 @@ function normalizeRooms(items = []) {
 
 const FLOORPLAN_IMAGE_PATH = './assets/plano-isometrico-v10.png';
 const floorLayout = [
-  { id: 'entry', type: 'rect', x: 156, y: 172, w: 166, h: 173, labelX: 240, labelY: 326, bubbleX: 286, bubbleY: 188 },
-  { id: 'kitchen', type: 'rect', x: 330, y: 62, w: 401, h: 377, labelX: 520, labelY: 396, bubbleX: 647, bubbleY: 110 },
-  { id: 'balcony', type: 'rect', x: 724, y: 40, w: 154, h: 178, labelX: 800, labelY: 204, bubbleX: 850, bubbleY: 68, labelSize: 'small' },
-  { id: 'bath2', type: 'rect', x: 592, y: 224, w: 295, h: 206, labelX: 742, labelY: 410, bubbleX: 848, bubbleY: 285, labelSize: 'small' },
-  { id: 'lucia', type: 'rect', x: 900, y: 230, w: 349, h: 299, labelX: 1070, labelY: 510, bubbleX: 1192, bubbleY: 258, labelSize: 'small' },
-  { id: 'living', type: 'rect', x: 128, y: 355, w: 391, h: 486, labelX: 282, labelY: 806, bubbleX: 164, bubbleY: 587 },
-  { id: 'hall', type: 'rect', x: 522, y: 428, w: 419, h: 95, labelX: 730, labelY: 477, bubbleX: 898, bubbleY: 446, base: 'room-base-neutral' },
-  { id: 'pablo', type: 'rect', x: 523, y: 526, w: 307, h: 376, labelX: 678, labelY: 886, bubbleX: 553, bubbleY: 640, labelSize: 'small' },
-  { id: 'bath1', type: 'rect', x: 898, y: 527, w: 350, h: 160, labelX: 1038, labelY: 684, bubbleX: 1182, bubbleY: 588, labelSize: 'small' },
-  { id: 'master', type: 'rect', x: 815, y: 676, w: 434, h: 249, labelX: 1018, labelY: 898, bubbleX: 1188, bubbleY: 740, labelSize: 'small' },
+  { id: 'entry', labelX: 245, labelY: 228 },
+  { id: 'kitchen', labelX: 525, labelY: 218 },
+  { id: 'balcony', labelX: 804, labelY: 126 },
+  { id: 'bath2', labelX: 748, labelY: 300 },
+  { id: 'lucia', labelX: 1092, labelY: 350 },
+  { id: 'living', labelX: 330, labelY: 585 },
+  { id: 'hall', labelX: 730, labelY: 472 },
+  { id: 'pablo', labelX: 690, labelY: 742 },
+  { id: 'bath1', labelX: 1080, labelY: 606 },
+  { id: 'master', labelX: 1035, labelY: 806 },
 ];
 
 const legacyRoomMap = {
@@ -646,22 +646,35 @@ function roomFurnitureMarkup(roomId) {
   return furniture[roomId] || '';
 }
 
+function floorRoomCardMarkup(room, layout, stats) {
+  const count = Math.max(0, Number(stats?.count) || 0);
+  const stateClass = stats?.overdue ? 'room-card-overdue' : count >= 4 ? 'room-card-busy' : count > 0 ? 'room-card-pending' : 'room-card-ok';
+  const name = String(room?.name || 'Estancia');
+  const cardWidth = Math.max(132, Math.min(270, name.length * 8.4 + 82));
+  const cardHeight = 48;
+  const x = layout.labelX - cardWidth / 2;
+  const y = layout.labelY - cardHeight / 2;
+  const badgeR = 15;
+  const badgeX = x + cardWidth - 35;
+  const textX = x + 16;
+  const arrowX = x + cardWidth - 13;
+  return `
+    <g class="floor-room-card ${stateClass}" data-room-id="${room.id}" role="button" tabindex="0" aria-label="${escapeHTML(room.name)}: ${count} tarea${count === 1 ? '' : 's'} pendiente${count === 1 ? '' : 's'}">
+      <rect class="room-card-bg" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${cardWidth.toFixed(1)}" height="${cardHeight}" rx="18"></rect>
+      <text class="room-card-name" x="${textX.toFixed(1)}" y="${layout.labelY + 1}" dominant-baseline="middle">${escapeHTML(name)}</text>
+      <circle class="room-card-count-bg" cx="${badgeX.toFixed(1)}" cy="${layout.labelY}" r="${badgeR}"></circle>
+      <text class="room-card-count" x="${badgeX.toFixed(1)}" y="${layout.labelY + 1}" dominant-baseline="middle" text-anchor="middle">${count}</text>
+      <text class="room-card-arrow" x="${arrowX.toFixed(1)}" y="${layout.labelY + 1}" dominant-baseline="middle" text-anchor="middle">›</text>
+    </g>`;
+}
+
 function renderFloorPlan() {
   if (!els.floorPlan) return;
-  const roomsMarkup = floorLayout.map(layout => {
+  const cardsMarkup = floorLayout.map(layout => {
     const room = roomById(layout.id) || defaultRooms.find(item => item.id === layout.id);
     if (!room) return '';
     const stats = roomStats(room.id);
-    const stateClass = stats.overdue ? 'room-state-overdue' : stats.count > 0 ? 'room-state-pending' : 'room-state-ok';
-    const statusText = stats.count === 0 ? 'al día' : `${stats.count} pendiente${stats.count === 1 ? '' : 's'}`;
-    const countMarkup = stats.count > 0 ? `<circle class="count-bubble" cx="${layout.bubbleX}" cy="${layout.bubbleY}" r="18"></circle><text class="count-number" x="${layout.bubbleX}" y="${layout.bubbleY}">${stats.count}</text>` : '';
-    return `
-      <g class="floor-room ${stateClass}" data-room-id="${room.id}" role="button" tabindex="0" aria-label="${escapeHTML(room.name)}: ${statusText}">
-        ${renderShape(layout, 'room-outline')}
-        ${renderShape(layout, 'room-hit-area')}
-        ${labelMarkup(room, layout)}
-        ${countMarkup}
-      </g>`;
+    return floorRoomCardMarkup(room, layout, stats);
   }).join('');
 
   els.floorPlan.innerHTML = `
@@ -670,19 +683,22 @@ function renderFloorPlan() {
         <filter id="photoPlanShadow" x="-8%" y="-8%" width="116%" height="116%">
           <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#050a0f" flood-opacity=".28"/>
         </filter>
+        <filter id="roomCardShadow" x="-25%" y="-40%" width="150%" height="180%">
+          <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#07111b" flood-opacity=".36"/>
+        </filter>
       </defs>
       <rect class="floor-photo-backdrop" x="10" y="10" width="1346" height="1004" rx="36"></rect>
       <g filter="url(#photoPlanShadow)">
         <image href="${FLOORPLAN_IMAGE_PATH}" x="0" y="0" width="1366" height="1024" preserveAspectRatio="xMidYMid meet"></image>
       </g>
-      ${roomsMarkup}
-      <text class="floor-caption" x="683" y="1002">Plano interactivo · toca una estancia para ver sus tareas</text>
+      <g class="floor-room-cards" filter="url(#roomCardShadow)">${cardsMarkup}</g>
+      <text class="floor-caption" x="683" y="1002">Plano interactivo · toca una tarjeta para ver las tareas de esa estancia</text>
     </svg>`;
 
-  els.floorPlan.querySelectorAll('.floor-room').forEach(roomEl => {
-    const openRoom = () => openRoomTasks(roomEl.dataset.roomId);
-    roomEl.addEventListener('click', openRoom);
-    roomEl.addEventListener('keydown', event => {
+  els.floorPlan.querySelectorAll('.floor-room-card').forEach(card => {
+    const openRoom = () => openRoomTasks(card.dataset.roomId);
+    card.addEventListener('click', openRoom);
+    card.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         openRoom();

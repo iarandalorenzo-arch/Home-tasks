@@ -972,3 +972,40 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
 .floor-plan-realistic .room-state-overdue .count-bubble { fill: #e85f66; }
 .floor-plan-realistic .count-number { fill: #fff; font-size: 14px; font-weight: 900; dominant-baseline: middle; text-anchor: middle; pointer-events: none; }
 .floor-plan-realistic .floor-caption { fill: #61758c; font-size: 9px; }
+
+
+/* V10.0.1 - tarjetas centrales interactivas por estancia */
+.floor-room-cards { pointer-events: none; }
+.floor-room-card { pointer-events: auto; cursor: pointer; outline: none; }
+.floor-room-card .room-card-bg {
+  stroke: rgba(255,255,255,.24);
+  stroke-width: 1.3;
+  transition: filter 140ms ease, transform 140ms ease, stroke 140ms ease;
+}
+.floor-room-card:hover .room-card-bg,
+.floor-room-card:focus .room-card-bg {
+  filter: brightness(1.12);
+  stroke: rgba(255,255,255,.55);
+}
+.room-card-name,
+.room-card-count,
+.room-card-arrow { fill: #fff; pointer-events: none; font-weight: 900; }
+.room-card-name { font-size: 14px; }
+.room-card-count { font-size: 13px; }
+.room-card-arrow { font-size: 24px; font-weight: 600; opacity: .92; }
+.room-card-count-bg { stroke: rgba(255,255,255,.2); stroke-width: 1; pointer-events: none; }
+.floor-room-card.room-card-ok .room-card-bg { fill: rgba(37,103,80,.95); }
+.floor-room-card.room-card-ok .room-card-count-bg { fill: rgba(255,255,255,.18); }
+.floor-room-card.room-card-pending .room-card-bg { fill: rgba(177,116,20,.96); }
+.floor-room-card.room-card-pending .room-card-count-bg { fill: rgba(255,255,255,.20); }
+.floor-room-card.room-card-busy .room-card-bg,
+.floor-room-card.room-card-overdue .room-card-bg { fill: rgba(174,55,62,.97); }
+.floor-room-card.room-card-busy .room-card-count-bg,
+.floor-room-card.room-card-overdue .room-card-count-bg { fill: rgba(255,255,255,.21); }
+
+/* La V10.0.1 elimina cualquier delimitación de color sobre el plano. */
+.floor-plan-realistic .room-outline,
+.floor-plan-realistic .room-hit-area,
+.floor-plan-realistic .floor-label-chip,
+.floor-plan-realistic .count-bubble,
+.floor-plan-realistic .count-number { display: none !important; }
