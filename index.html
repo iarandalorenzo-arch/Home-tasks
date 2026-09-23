@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V8.2.0</title>
+  <title>HomeTasks V8.3.0</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -19,7 +19,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V8.2.0 · planificación y rutinas semanales</p>
+          <p class="subtitle">V8.3.0 · panel diario y mapa renovado</p>
         </div>
       </div>
       <div class="top-actions">
@@ -30,8 +30,8 @@
     </header>
 
     <main id="mainContent" class="content" tabindex="-1">
-      <section id="view-today" class="view active" aria-labelledby="todayTitle">
-        <div class="section-heading task-heading">
+      <section id="view-today" class="view active today-view" aria-labelledby="todayTitle">
+        <div class="section-heading task-heading today-heading">
           <div>
             <p class="eyebrow">Agenda del día</p>
             <h2 id="todayTitle">Hoy</h2>
@@ -40,72 +40,76 @@
           <button id="todayNewTaskButton" class="primary-button" type="button">+ Nueva tarea</button>
         </div>
 
-        <article class="card floor-card today-floor-card">
-          <div class="card-header">
-            <div>
-              <h3 id="houseNameDisplay">Mi casa</h3>
-              <p>Toca una estancia para abrir sus tareas.</p>
+        <div class="today-dashboard-grid">
+          <article class="card today-map-card">
+            <div class="card-header today-card-heading">
+              <div>
+                <p class="today-card-kicker">⌂ Mapa de casa</p>
+                <h3 id="houseNameDisplay">Mi casa</h3>
+                <p>Toca una estancia para abrir sus tareas.</p>
+              </div>
+              <button id="clearRoomFilterButton" class="text-button" type="button" hidden>Ver toda la casa</button>
             </div>
-            <button id="clearRoomFilterButton" class="text-button" type="button" hidden>Ver toda la casa</button>
-          </div>
-          <div id="floorPlan" class="floor-plan" aria-label="Plano interactivo simplificado de la vivienda"></div>
-          <div class="legend">
-            <span><i class="legend-swatch ok"></i>Al día</span>
-            <span><i class="legend-swatch pending"></i>Pendientes</span>
-            <span><i class="legend-swatch overdue"></i>Vencidas</span>
-          </div>
-        </article>
+            <div id="floorPlan" class="floor-plan floor-plan-realistic" aria-label="Plano interactivo de la vivienda"></div>
+            <div class="legend today-map-legend">
+              <span><i class="legend-swatch ok"></i>Al día</span>
+              <span><i class="legend-swatch pending"></i>Pendientes</span>
+              <span><i class="legend-swatch overdue"></i>Vencidas</span>
+            </div>
+          </article>
 
-        <article class="card today-toolbar">
-          <label class="today-person-filter">
-            <span>Mostrar tareas de</span>
-            <select id="todayAssigneeFilter"><option value="all">Toda la casa</option></select>
-          </label>
-          <button id="todayOpenPlanButton" class="secondary-button" type="button">Ver semana</button>
-        </article>
+          <div class="today-center-column">
+            <article class="card today-plan-card">
+              <div class="today-plan-head">
+                <div>
+                  <p class="today-card-kicker">▣ Plan de hoy</p>
+                  <h3>Tareas programadas <span id="todayAssignedCount" class="today-head-count">0</span></h3>
+                  <p>Ordenadas por la hora prevista.</p>
+                </div>
+                <button id="todayOpenPlanButton" class="secondary-button compact-button" type="button">Ver semana</button>
+              </div>
+              <div class="today-plan-filter-row">
+                <label class="today-person-filter">
+                  <span>Mostrar tareas de</span>
+                  <select id="todayAssigneeFilter"><option value="all">Toda la casa</option></select>
+                </label>
+              </div>
+              <p class="today-swipe-hint">En móvil: desliza a la derecha para completar y a la izquierda para pasar a mañana.</p>
+              <div id="todayTaskList" class="today-agenda-list"></div>
+            </article>
 
-        <div class="today-stats">
-          <article class="card today-stat"><span>Para hoy</span><strong id="todayDashboardPending">0</strong></article>
-          <article class="card today-stat danger"><span>Vencidas</span><strong id="todayDashboardOverdue">0</strong></article>
-          <article class="card today-stat success"><span>Hechas hoy</span><strong id="todayDashboardDone">0</strong></article>
-          <article class="card today-stat"><span>Sin asignar</span><strong id="todayDashboardUnassigned">0</strong></article>
+            <article class="card today-summary-card">
+              <div class="card-header compact">
+                <div><h3>Resumen del día</h3><p>Una vista rápida de la carga prevista.</p></div>
+              </div>
+              <div class="today-summary-grid">
+                <div class="today-summary-stat"><span>Programadas</span><strong id="todayDashboardPending">0</strong></div>
+                <div class="today-summary-stat success"><span>Hechas hoy</span><strong id="todayDashboardDone">0</strong></div>
+                <div class="today-summary-stat"><span>Tiempo previsto</span><strong id="todayDashboardMinutes">0 min</strong></div>
+                <div class="today-summary-stat warning"><span>Sin asignar</span><strong id="todayDashboardUnassigned">0</strong></div>
+              </div>
+            </article>
+          </div>
+
+          <article class="card today-unassigned-panel">
+            <div class="today-unassigned-head">
+              <div>
+                <p class="today-card-kicker">▰ Bandeja</p>
+                <h3>Tareas de hoy sin asignar <span id="todayUnassignedCount" class="today-head-count">0</span></h3>
+                <p>Asigna una persona y HomeTasks buscará un hueco libre.</p>
+              </div>
+            </div>
+            <div id="todayUnassignedList" class="today-unassigned-list"></div>
+            <button id="todayUnassignedNewButton" class="today-add-unassigned" type="button">+ Añadir tarea sin asignar</button>
+          </article>
         </div>
 
-        <p class="today-swipe-hint">En móvil: desliza una tarea a la derecha para completarla y a la izquierda para pasarla a mañana.</p>
-
-        <div class="today-priority-grid">
-          <article class="card today-panel overdue-panel">
-            <div class="card-header compact">
-              <div><h3>Vencidas</h3><p>Lo que ya debería estar hecho.</p></div>
-            </div>
-            <div id="todayOverdueList" class="today-task-list"></div>
-          </article>
-          <article class="card today-panel today-focus-panel">
-            <div class="card-header compact">
-              <div><h3>Hoy</h3><p>Las tareas del día.</p></div>
-            </div>
-            <div id="todayTaskList" class="today-task-list"></div>
-          </article>
-          <article class="card today-panel">
-            <div class="card-header compact">
-              <div><h3>Sin fecha</h3><p>Pendientes todavía sin planificar.</p></div>
-            </div>
-            <div id="todayNoDateList" class="today-task-list"></div>
-          </article>
-        </div>
-
-        <div class="today-lower-grid">
+        <div class="today-secondary-grid">
           <article class="card today-panel">
             <div class="card-header compact">
               <div><h3>Mañana</h3><p>Vista rápida del siguiente día.</p></div>
             </div>
             <div id="todayTomorrowList" class="today-task-list compact"></div>
-          </article>
-          <article class="card today-panel waiting-panel">
-            <div class="card-header compact">
-              <div><h3>En espera</h3><p>Tareas encadenadas que todavía no están disponibles.</p></div>
-            </div>
-            <div id="todayWaitingList" class="today-task-list compact"></div>
           </article>
           <article class="card today-panel">
             <div class="card-header compact">
@@ -362,7 +366,7 @@
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Version</span><strong>8.2.0</strong></div>
+            <div class="setting-row"><span>Version</span><strong>8.3.0</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -480,7 +484,7 @@
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">8.2.0</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">8.3.0</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>

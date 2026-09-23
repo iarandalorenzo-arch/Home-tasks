@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '8.2.0';
+const APP_VERSION = '8.3.0';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -280,7 +280,7 @@ function cacheElements() {
   [
     'connectionBadge','syncHeaderBadge','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
     'roomFilter','statusFilter','assigneeFilter','taskSearch','taskList','activeRoomHint','newTaskButton',
-    'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayDashboardPending','todayDashboardOverdue','todayDashboardDone','todayDashboardUnassigned','todayTaskList','todayOverdueList','todayNoDateList','todayTomorrowList','todayWaitingList','todayRecentHistory',
+    'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayUnassignedNewButton','todayDashboardPending','todayDashboardDone','todayDashboardMinutes','todayDashboardUnassigned','todayAssignedCount','todayUnassignedCount','todayTaskList','todayUnassignedList','todayTomorrowList','todayRecentHistory',
     'statsPeriodFilter','statsCompleted','statsActiveDays','statsPending','statsOverdue','statsPeriodLabel','statsPeople','statsRooms','statsTrend','historyUserFilter','historyRoomFilter','historyList',
     'routineRoomFilter','routineSearch','routineList','newRoutineButton','templateCount','activeRoutineCount',
     'planPrevWeek','planTodayWeek','planNextWeek','planWeekLabel','planAssigneeFilter','weeklyPlanner','planBacklog','workloadSummary',
@@ -603,39 +603,87 @@ function renderShape(layout, extraClass = '') {
 }
 
 function labelMarkup(room, layout) {
-  const name = escapeHTML(room.name);
-  const size = layout.labelSize ? ` ${layout.labelSize}` : '';
-  const words = room.name.split(' ');
-  if (room.name.length <= 16) {
-    return `<text class="floor-label${size}" x="${layout.labelX}" y="${layout.labelY}" text-anchor="middle">${name}</text>`;
-  }
-  const splitAt = Math.ceil(words.length / 2);
-  const line1 = escapeHTML(words.slice(0, splitAt).join(' '));
-  const line2 = escapeHTML(words.slice(splitAt).join(' '));
-  return `<text class="floor-label${size}" x="${layout.labelX}" y="${layout.labelY - 10}" text-anchor="middle"><tspan x="${layout.labelX}">${line1}</tspan><tspan x="${layout.labelX}" dy="21">${line2}</tspan></text>`;
+  const words = String(room.name || '').split(' ');
+  const isLong = room.name.length > 16;
+  const splitAt = isLong ? Math.ceil(words.length / 2) : words.length;
+  const lines = isLong ? [words.slice(0, splitAt).join(' '), words.slice(splitAt).join(' ')] : [room.name];
+  const maxChars = Math.max(...lines.map(line => line.length));
+  const width = Math.max(82, Math.min(184, maxChars * 7.7 + 30));
+  const height = isLong ? 48 : 34;
+  const x = layout.labelX - width / 2;
+  const y = layout.labelY - height / 2;
+  const textY = isLong ? layout.labelY - 6 : layout.labelY + 1;
+  const text = isLong
+    ? `<text class="floor-label floor-label-chip-text" x="${layout.labelX}" y="${textY}" text-anchor="middle"><tspan x="${layout.labelX}">${escapeHTML(lines[0])}</tspan><tspan x="${layout.labelX}" dy="17">${escapeHTML(lines[1])}</tspan></text>`
+    : `<text class="floor-label floor-label-chip-text" x="${layout.labelX}" y="${textY}" text-anchor="middle">${escapeHTML(room.name)}</text>`;
+  return `<g class="floor-label-chip"><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${width.toFixed(1)}" height="${height}" rx="12"></rect>${text}</g>`;
+}
+
+function floorSurfaceClass(roomId) {
+  if (['bath1', 'bath2'].includes(roomId)) return 'floor-surface-tile';
+  if (roomId === 'balcony') return 'floor-surface-balcony';
+  if (roomId === 'kitchen') return 'floor-surface-kitchen';
+  return 'floor-surface-wood';
+}
+
+function roomFurnitureMarkup(roomId) {
+  const furniture = {
+    entry: `<g class="floor-furniture"><rect class="f-rug" x="72" y="104" width="102" height="58" rx="7"/><rect class="f-wood" x="52" y="58" width="94" height="22" rx="5"/><circle class="f-plant" cx="178" cy="72" r="16"/><circle class="f-pot" cx="178" cy="78" r="7"/></g>`,
+    kitchen: `<g class="floor-furniture"><rect class="f-counter" x="238" y="55" width="340" height="43" rx="5"/><rect class="f-counter" x="238" y="98" width="55" height="128" rx="5"/><rect class="f-fridge" x="529" y="103" width="48" height="86" rx="5"/><rect class="f-sink" x="349" y="63" width="58" height="26" rx="6"/><circle class="f-sink-hole" cx="378" cy="76" r="8"/><rect class="f-hob" x="430" y="62" width="52" height="28" rx="5"/><circle class="f-hob-dot" cx="443" cy="71" r="5"/><circle class="f-hob-dot" cx="469" cy="81" r="5"/><rect class="f-table" x="350" y="199" width="116" height="70" rx="8"/><circle class="f-chair" cx="337" cy="219" r="11"/><circle class="f-chair" cx="479" cy="219" r="11"/><circle class="f-chair" cx="337" cy="252" r="11"/><circle class="f-chair" cx="479" cy="252" r="11"/><circle class="f-plant" cx="315" cy="132" r="15"/><circle class="f-pot" cx="315" cy="138" r="6"/></g>`,
+    balcony: `<g class="floor-furniture"><rect class="f-deck" x="625" y="54" width="115" height="114" rx="5"/><circle class="f-table-round" cx="682" cy="112" r="23"/><circle class="f-chair" cx="642" cy="112" r="12"/><circle class="f-chair" cx="722" cy="112" r="12"/><circle class="f-plant" cx="730" cy="61" r="13"/><circle class="f-pot" cx="730" cy="66" r="5"/></g>`,
+    bath2: `<g class="floor-furniture"><rect class="f-shower" x="682" y="198" width="58" height="64" rx="5"/><line class="f-glass" x1="690" y1="206" x2="733" y2="254"/><ellipse class="f-toilet" cx="711" cy="301" rx="23" ry="14"/><rect class="f-ceramic" x="623" y="199" width="45" height="31" rx="7"/><circle class="f-sink-hole" cx="646" cy="214" r="6"/></g>`,
+    lucia: `<g class="floor-furniture"><rect class="f-rug" x="802" y="268" width="154" height="99" rx="8"/><rect class="f-bed" x="826" y="220" width="136" height="111" rx="8"/><rect class="f-pillow" x="843" y="233" width="45" height="24" rx="8"/><rect class="f-pillow" x="899" y="233" width="45" height="24" rx="8"/><rect class="f-desk" x="784" y="353" width="84" height="31" rx="6"/><circle class="f-chair" cx="826" cy="342" r="12"/><circle class="f-plant" cx="983" cy="208" r="13"/><circle class="f-pot" cx="983" cy="214" r="5"/></g>`,
+    living: `<g class="floor-furniture"><rect class="f-rug" x="177" y="430" width="208" height="151" rx="10"/><path class="f-sofa" d="M198 447 h154 a12 12 0 0 1 12 12 v39 h-42 v-20 H228 v20 h-42 v-39 a12 12 0 0 1 12-12z"/><rect class="f-cushion" x="222" y="454" width="45" height="18" rx="7"/><rect class="f-cushion" x="277" y="454" width="45" height="18" rx="7"/><rect class="f-table" x="247" y="515" width="72" height="45" rx="12"/><rect class="f-tv" x="54" y="388" width="25" height="126" rx="5"/><rect class="f-console" x="82" y="408" width="26" height="84" rx="5"/><circle class="f-plant" cx="126" cy="371" r="20"/><circle class="f-pot" cx="126" cy="380" r="8"/><circle class="f-plant" cx="390" cy="626" r="19"/><circle class="f-pot" cx="390" cy="635" r="8"/></g>`,
+    hall: `<g class="floor-furniture"><rect class="f-runner" x="475" y="366" width="246" height="47" rx="22"/></g>`,
+    pablo: `<g class="floor-furniture"><rect class="f-rug" x="480" y="520" width="126" height="125" rx="8"/><rect class="f-bed" x="520" y="474" width="155" height="103" rx="8"/><rect class="f-pillow" x="540" y="486" width="46" height="22" rx="8"/><rect class="f-desk" x="466" y="641" width="105" height="31" rx="6"/><circle class="f-chair" cx="520" cy="625" r="12"/><circle class="f-plant" cx="683" cy="666" r="13"/><circle class="f-pot" cx="683" cy="671" r="5"/></g>`,
+    bath1: `<g class="floor-furniture"><rect class="f-ceramic" x="788" y="431" width="61" height="33" rx="7"/><circle class="f-sink-hole" cx="819" cy="447" r="7"/><ellipse class="f-toilet" cx="889" cy="474" rx="25" ry="14"/><rect class="f-shower" x="938" y="427" width="56" height="91" rx="5"/><line class="f-glass" x1="944" y1="433" x2="988" y2="511"/></g>`,
+    master: `<g class="floor-furniture"><rect class="f-rug" x="814" y="574" width="153" height="92" rx="8"/><rect class="f-bed" x="839" y="557" width="132" height="112" rx="8"/><rect class="f-pillow" x="852" y="569" width="45" height="23" rx="8"/><rect class="f-pillow" x="910" y="569" width="45" height="23" rx="8"/><rect class="f-wardrobe" x="785" y="558" width="39" height="112" rx="4"/><circle class="f-plant" cx="990" cy="661" r="13"/><circle class="f-pot" cx="990" cy="667" r="5"/></g>`,
+  };
+  return furniture[roomId] || '';
 }
 
 function renderFloorPlan() {
+  if (!els.floorPlan) return;
   const roomsMarkup = floorLayout.map(layout => {
     const room = roomById(layout.id) || defaultRooms.find(item => item.id === layout.id);
     if (!room) return '';
     const stats = roomStats(room.id);
     const stateClass = stats.overdue ? 'room-state-overdue' : stats.count > 0 ? 'room-state-pending' : 'room-state-ok';
-    const statusText = stats.count === 0 ? 'al dia' : `${stats.count} pendiente${stats.count === 1 ? '' : 's'}`;
+    const statusText = stats.count === 0 ? 'al día' : `${stats.count} pendiente${stats.count === 1 ? '' : 's'}`;
+    const countMarkup = stats.count > 0 ? `<circle class="count-bubble" cx="${layout.bubbleX}" cy="${layout.bubbleY}" r="18"></circle><text class="count-number" x="${layout.bubbleX}" y="${layout.bubbleY}">${stats.count}</text>` : '';
     return `
       <g class="floor-room ${stateClass}" data-room-id="${room.id}" role="button" tabindex="0" aria-label="${escapeHTML(room.name)}: ${statusText}">
-        ${renderShape(layout, `room-shape ${layout.base}`)}
+        ${renderShape(layout, `room-shadow ${floorSurfaceClass(room.id)}`)}
+        ${renderShape(layout, `room-shape ${floorSurfaceClass(room.id)}`)}
         ${renderShape(layout, 'room-overlay')}
+        ${roomFurnitureMarkup(room.id)}
         ${labelMarkup(room, layout)}
-        <circle class="count-bubble" cx="${layout.bubbleX}" cy="${layout.bubbleY}" r="19"></circle>
-        <text class="count-number" x="${layout.bubbleX}" y="${layout.bubbleY}">${stats.count}</text>
+        ${countMarkup}
       </g>`;
   }).join('');
 
   els.floorPlan.innerHTML = `
-    <svg viewBox="0 0 1045 725" role="img" aria-label="Plano simplificado de la vivienda">
-      ${roomsMarkup}
-      <text class="floor-caption" x="522" y="715">Plano simplificado · HomeTasks V3</text>
+    <svg viewBox="0 0 1045 725" role="img" aria-label="Plano interactivo de la vivienda">
+      <defs>
+        <pattern id="woodFloor" width="54" height="18" patternUnits="userSpaceOnUse">
+          <rect width="54" height="18" fill="#d9c5a6"></rect>
+          <path d="M0 17.5H54M18 0v18M45 0v18" stroke="#bda786" stroke-width="1" opacity=".42"></path>
+          <path d="M4 6c10-4 19-4 29 0M23 14c8-3 17-3 26 0" stroke="#c7b18f" stroke-width="1" opacity=".45" fill="none"></path>
+        </pattern>
+        <pattern id="kitchenFloor" width="46" height="23" patternUnits="userSpaceOnUse">
+          <rect width="46" height="23" fill="#cfbea3"></rect><path d="M0 22.5H46M23 0v23" stroke="#ad9b80" opacity=".4"/>
+        </pattern>
+        <pattern id="tileFloor" width="34" height="34" patternUnits="userSpaceOnUse">
+          <rect width="34" height="34" fill="#b9c3cb"></rect><path d="M34 0H0V34" fill="none" stroke="#8f9da8" stroke-width="1.4" opacity=".55"></path>
+        </pattern>
+        <pattern id="balconyFloor" width="28" height="28" patternUnits="userSpaceOnUse">
+          <rect width="28" height="28" fill="#a6aa9d"></rect><path d="M0 14H28M14 0V28" stroke="#858a80" opacity=".45"></path>
+        </pattern>
+        <filter id="floorShadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="9" stdDeviation="9" flood-color="#000" flood-opacity=".32"/></filter>
+      </defs>
+      <rect class="floor-scene" x="10" y="10" width="1025" height="695" rx="28"></rect>
+      <g filter="url(#floorShadow)">${roomsMarkup}</g>
+      <text class="floor-caption" x="522" y="713">Plano interactivo · toca una estancia para ver sus tareas</text>
     </svg>`;
 
   els.floorPlan.querySelectorAll('.floor-room').forEach(roomEl => {
@@ -849,50 +897,72 @@ function bindTodayTaskEvents(root) {
   });
 }
 
+
+function todayTimelineMarkup(task) {
+  const label = task.dueTime || 'Sin hora';
+  const late = isOverdue(task) ? ' late' : '';
+  return `<div class="today-agenda-row${late}"><time>${escapeHTML(label)}</time><span class="today-agenda-dot"></span><div class="today-agenda-card">${todayTaskMarkup(task)}</div></div>`;
+}
+
 function renderToday() {
   if (!els.todayTaskList) return;
   const selected = els.todayAssigneeFilter?.value || 'all';
   const today = todayISO();
   const tomorrow = addDaysISO(1);
-  const pendingAll = state.tasks.filter(task => !task.completed && todayMatchesAssignee(task, selected));
-  const waitingTasks = pendingAll.filter(task => isWaitingTask(task)).sort((a, b) => Number(a.availableAt || 0) - Number(b.availableAt || 0));
-  const pending = pendingAll.filter(task => !isWaitingTask(task));
   const byPriorityThenCreated = (a, b) => (a.priority === b.priority ? 0 : a.priority === 'high' ? -1 : 1) || (a.createdAt || 0) - (b.createdAt || 0);
-  const overdue = pending.filter(isOverdue).sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '') || (a.dueTime || '').localeCompare(b.dueTime || '') || byPriorityThenCreated(a, b));
-  const dueToday = pending.filter(task => task.dueDate === today && !isOverdue(task)).sort((a, b) => (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99') || byPriorityThenCreated(a, b));
-  const noDate = pending.filter(task => !task.dueDate).sort(byPriorityThenCreated);
-  const tomorrowTasks = pending.filter(task => task.dueDate === tomorrow).sort(byPriorityThenCreated);
+
+  const pendingVisible = state.tasks.filter(task => !task.completed && !isWaitingTask(task));
+  const assignedToday = pendingVisible
+    .filter(task => task.dueDate === today && task.assigneeId && todayMatchesAssignee(task, selected))
+    .sort((a, b) => (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99') || byPriorityThenCreated(a, b));
+  const unassignedToday = pendingVisible
+    .filter(task => task.dueDate === today && !task.assigneeId)
+    .sort((a, b) => (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99') || byPriorityThenCreated(a, b));
+  const tomorrowTasks = pendingVisible
+    .filter(task => task.dueDate === tomorrow && todayMatchesAssignee(task, selected))
+    .sort((a, b) => (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99') || byPriorityThenCreated(a, b));
   const doneToday = state.history.filter(item => localISO(new Date(item.completedAt)) === today && (selected === 'all' || (selected === 'unassigned' ? !item.assigneeId : item.assigneeId === selected)));
-  const unassigned = state.tasks.filter(task => !task.completed && !task.assigneeId && (task.dueDate === today || (task.dueDate && task.dueDate < today))).length;
+  const plannedMinutes = assignedToday.reduce((sum, task) => sum + normalizedDuration(task.durationMinutes), 0);
 
   els.todayDateLabel.textContent = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
-  els.todayDashboardPending.textContent = dueToday.length;
-  els.todayDashboardOverdue.textContent = overdue.length;
-  els.todayDashboardDone.textContent = doneToday.length;
-  els.todayDashboardUnassigned.textContent = unassigned;
+  if (els.todayDashboardPending) els.todayDashboardPending.textContent = assignedToday.length;
+  if (els.todayDashboardDone) els.todayDashboardDone.textContent = doneToday.length;
+  if (els.todayDashboardMinutes) els.todayDashboardMinutes.textContent = plannedMinutes ? durationText(plannedMinutes) : '0 min';
+  if (els.todayDashboardUnassigned) els.todayDashboardUnassigned.textContent = unassignedToday.length;
+  if (els.todayAssignedCount) els.todayAssignedCount.textContent = assignedToday.length;
+  if (els.todayUnassignedCount) els.todayUnassignedCount.textContent = unassignedToday.length;
 
-  const renderList = (element, tasks, emptyText, options = {}) => {
-    if (!element) return;
-    element.innerHTML = tasks.length ? tasks.map(task => todayTaskMarkup(task, options)).join('') : `<div class="today-empty">${emptyText}</div>`;
-    bindTodayTaskEvents(element);
-  };
+  els.todayTaskList.innerHTML = assignedToday.length
+    ? assignedToday.map(todayTimelineMarkup).join('')
+    : `<div class="today-empty today-agenda-empty">No hay tareas programadas para hoy${selected !== 'all' ? ' con este filtro' : ''}.</div>`;
+  bindTodayTaskEvents(els.todayTaskList);
 
-  renderList(els.todayOverdueList, overdue, 'No hay tareas vencidas.', { showDate: true });
-  renderList(els.todayTaskList, dueToday, 'No hay tareas pendientes para hoy.');
-  renderList(els.todayNoDateList, noDate.slice(0, 10), 'No hay tareas sin fecha.');
-  renderList(els.todayTomorrowList, tomorrowTasks.slice(0, 6), 'No hay tareas previstas para mañana.', { compact: true });
-  renderList(els.todayWaitingList, waitingTasks.slice(0, 8), 'No hay tareas encadenadas en espera.', { showDate: true });
+  if (els.todayUnassignedList) {
+    els.todayUnassignedList.innerHTML = unassignedToday.length
+      ? unassignedToday.map(task => todayTaskMarkup(task)).join('')
+      : '<div class="today-empty">Todas las tareas de hoy tienen responsable.</div>';
+    bindTodayTaskEvents(els.todayUnassignedList);
+  }
+
+  if (els.todayTomorrowList) {
+    els.todayTomorrowList.innerHTML = tomorrowTasks.length
+      ? tomorrowTasks.slice(0, 8).map(task => todayTaskMarkup(task, { compact: true })).join('')
+      : '<div class="today-empty">No hay tareas previstas para mañana.</div>';
+    bindTodayTaskEvents(els.todayTomorrowList);
+  }
 
   const recent = [...state.history]
     .filter(item => selected === 'all' || (selected === 'unassigned' ? !item.assigneeId : item.assigneeId === selected))
     .sort((a, b) => b.completedAt - a.completedAt)
     .slice(0, 6);
-  els.todayRecentHistory.innerHTML = recent.length ? recent.map(item => {
-    const room = roomById(item.roomId)?.name || item.roomName || 'Sin ubicación';
-    const person = userName(item.assigneeId, item.assigneeName);
-    const when = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(item.completedAt));
-    return `<div class="today-history-row"><span class="today-history-check">✓</span><span><strong>${escapeHTML(item.title)}</strong><small>${escapeHTML(room)} · ${escapeHTML(person)}</small></span><time>${when}</time></div>`;
-  }).join('') : '<div class="today-empty">Todavía no hay actividad reciente.</div>';
+  if (els.todayRecentHistory) {
+    els.todayRecentHistory.innerHTML = recent.length ? recent.map(item => {
+      const room = roomById(item.roomId)?.name || item.roomName || 'Sin ubicación';
+      const person = userName(item.assigneeId, item.assigneeName);
+      const when = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(item.completedAt));
+      return `<div class="today-history-row"><span class="today-history-check">✓</span><span><strong>${escapeHTML(item.title)}</strong><small>${escapeHTML(room)} · ${escapeHTML(person)}</small></span><time>${when}</time></div>`;
+    }).join('') : '<div class="today-empty">Todavía no hay actividad reciente.</div>';
+  }
 }
 
 function getFilteredTasks() {
@@ -3003,6 +3073,7 @@ function setupEvents() {
 
   els.newTaskButton.addEventListener('click', () => openTaskDialog());
   els.todayNewTaskButton?.addEventListener('click', () => openTaskDialog(null, todayISO()));
+  els.todayUnassignedNewButton?.addEventListener('click', () => { openTaskDialog(null, todayISO()); if (els.taskAssignee) els.taskAssignee.value = ''; if (els.taskDueTime) els.taskDueTime.value = ''; validateTaskScheduleForm(); });
   els.todayOpenPlanButton?.addEventListener('click', () => switchView('plan'));
   els.syncHeaderBadge?.addEventListener('click', () => { switchView('settings'); setTimeout(() => els.syncSettingsCard?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); });
   els.newRoutineButton.addEventListener('click', () => openRoutineDialog());
