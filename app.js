@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '8.1.2';
+const APP_VERSION = '8.2.0';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -548,7 +548,13 @@ async function materializeAutoRoutines() {
     if (runDate > today) continue;
 
     const taskId = `auto:${template.id}:${runDate}`;
-    if (!state.tasks.some(task => task.id === taskId)) {
+    // V8.2: una instancia manual (Crear hoy / Crear semana) para la misma
+    // rutina y fecha cuenta como materializada. Así la generación automática
+    // no crea un duplicado cuando llegue ese día.
+    const alreadyMaterialized = state.tasks.some(task =>
+      task.id === taskId || (task.templateId === template.id && task.dueDate === runDate)
+    );
+    if (!alreadyMaterialized) {
       const task = {
         id: taskId,
         templateId: template.id,
@@ -1169,6 +1175,7 @@ function renderRoutines() {
       </div>
       <div class="routine-actions">
         <button class="secondary-button routine-create" type="button">Crear hoy</button>
+        <button class="secondary-button routine-create-week" type="button" title="Crear esta rutina desde hoy hasta el domingo">Crear semana</button>
         <button class="task-action routine-edit" type="button" aria-label="Editar rutina" title="Editar">✎</button>
         <button class="task-action routine-delete" type="button" aria-label="Eliminar rutina" title="Eliminar">×</button>
       </div>
@@ -1177,6 +1184,22 @@ function renderRoutines() {
   els.routineList.querySelectorAll('.routine-card').forEach(card => {
     const id = card.dataset.templateId;
     card.querySelector('.routine-create').addEventListener('click', () => createTaskFromTemplate(id));
+    card.querySelector('.routine-create-week').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      if (button.disabled) return;
+      button.disabled = true;
+      const previousText = button.textContent;
+      button.textContent = 'Creando…';
+      try {
+        await createWeekFromTemplate(id);
+      } finally {
+        // renderAll normalmente sustituye la tarjeta; este fallback cubre errores.
+        if (button.isConnected) {
+          button.disabled = false;
+          button.textContent = previousText;
+        }
+      }
+    });
     card.querySelector('.routine-edit').addEventListener('click', () => openRoutineDialog(id));
     card.querySelector('.routine-delete').addEventListener('click', () => deleteRoutine(id));
   });
@@ -1293,7 +1316,110 @@ async function deleteRoutine(id) {
   touchCloudDirty();
 }
 
-async function createTaskFromTemplate(id){const template=state.templates.find(item=>item.id===id);if(!template)return;const existing=state.tasks.find(task=>task.templateId===template.id&&!task.completed);if(existing){els.roomFilter.value=template.roomId;els.statusFilter.value='pending';switchView('tasks');renderTasks();showToast('Esta rutina ya tiene una tarea pendiente');return;}const task={id:makeId(),templateId:template.id,title:template.title,roomId:template.roomId,assigneeId:template.assigneeId||null,assigneeName:template.assigneeId?userName(template.assigneeId,''):undefined,dueDate:todayISO(),dueTime:template.dueTime||'',durationMinutes:normalizedDuration(template.durationMinutes),reminderMinutes:parseReminderMinutes(template.reminderMinutes),priority:template.priority||'normal',recurrence:template.autoGenerate?'none':(template.recurrence||'none'),recurrenceDays:template.autoGenerate?null:(template.recurrenceDays||null),nextTemplateId:template.nextTemplateId||null,nextDelayMinutes:Number(template.nextDelayMinutes||0),completed:false,createdAt:Date.now(),modifiedAt:Date.now()};if(task.assigneeId){const slot=firstFreeSlotOnDate(task.assigneeId,task.dueDate,task.durationMinutes,task.dueTime);if(slot)task.dueTime=slot.time;else{task.suggestedAssigneeId=task.assigneeId;task.assigneeId=null;task.assigneeName=undefined;task.dueTime='';}}await put('tasks',task);await loadState();els.roomFilter.value=template.roomId;els.statusFilter.value='pending';switchView('tasks');renderAll();showToast(task.assigneeId?`Tarea programada a las ${task.dueTime}`:'Tarea creada pendiente de programar');touchCloudDirty();}
+function taskExistsForTemplateDate(templateId, dueDate) {
+  return state.tasks.some(task => task.templateId === templateId && task.dueDate === dueDate);
+}
+
+function buildTaskFromTemplateForDate(template, dueDate, { oneOff = false } = {}) {
+  const now = Date.now();
+  const task = {
+    id: makeId(),
+    templateId: template.id,
+    title: template.title,
+    roomId: template.roomId,
+    assigneeId: template.assigneeId || null,
+    assigneeName: template.assigneeId ? userName(template.assigneeId, '') : undefined,
+    dueDate,
+    dueTime: template.dueTime || '',
+    durationMinutes: normalizedDuration(template.durationMinutes),
+    reminderMinutes: parseReminderMinutes(template.reminderMinutes),
+    priority: template.priority || 'normal',
+    recurrence: oneOff || template.autoGenerate ? 'none' : (template.recurrence || 'none'),
+    recurrenceDays: oneOff || template.autoGenerate ? null : (template.recurrenceDays || null),
+    nextTemplateId: template.nextTemplateId || null,
+    nextDelayMinutes: Number(template.nextDelayMinutes || 0),
+    completed: false,
+    createdAt: now,
+    modifiedAt: now,
+  };
+
+  if (task.assigneeId) {
+    const slot = firstFreeSlotOnDate(task.assigneeId, task.dueDate, task.durationMinutes, task.dueTime);
+    if (slot) {
+      task.dueTime = slot.time;
+    } else {
+      // Conservamos quién debería realizarla para poder programarla después,
+      // pero no forzamos una hora inválida ni un solape.
+      task.suggestedAssigneeId = task.assigneeId;
+      task.assigneeId = null;
+      task.assigneeName = undefined;
+      task.dueTime = '';
+    }
+  }
+  return task;
+}
+
+async function createTaskFromTemplate(id) {
+  const template = state.templates.find(item => item.id === id);
+  if (!template) return;
+  const dueDate = todayISO();
+  const existing = state.tasks.find(task => task.templateId === template.id && task.dueDate === dueDate);
+  if (existing) {
+    els.roomFilter.value = template.roomId;
+    els.statusFilter.value = existing.completed ? 'all' : 'pending';
+    switchView('tasks');
+    renderTasks();
+    showToast('Esta rutina ya existe para hoy');
+    return;
+  }
+
+  const task = buildTaskFromTemplateForDate(template, dueDate);
+  await put('tasks', task);
+  await loadState();
+  els.roomFilter.value = template.roomId;
+  els.statusFilter.value = 'pending';
+  switchView('tasks');
+  renderAll();
+  showToast(task.assigneeId ? `Tarea programada a las ${task.dueTime}` : 'Tarea creada pendiente de programar');
+  touchCloudDirty();
+}
+
+async function createWeekFromTemplate(id) {
+  const template = state.templates.find(item => item.id === id);
+  if (!template) return;
+
+  const today = new Date(`${todayISO()}T12:00:00`);
+  const daysUntilSunday = (7 - today.getDay()) % 7;
+  const dates = Array.from({ length: daysUntilSunday + 1 }, (_, index) => localISO(addDaysToDate(today, index)));
+  const tasksToCreate = [];
+  let existingCount = 0;
+  let pendingScheduleCount = 0;
+
+  for (const dueDate of dates) {
+    if (taskExistsForTemplateDate(template.id, dueDate)) {
+      existingCount += 1;
+      continue;
+    }
+
+    // Las instancias creadas con "Crear semana" son deliberadamente únicas.
+    // La recurrencia sigue perteneciendo a la plantilla; así evitamos crear
+    // varias cadenas recurrentes paralelas al generar miércoles-domingo, etc.
+    const task = buildTaskFromTemplateForDate(template, dueDate, { oneOff: true });
+    task.createdFromWeek = true;
+    if (task.suggestedAssigneeId && !task.assigneeId) pendingScheduleCount += 1;
+    tasksToCreate.push(task);
+  }
+
+  if (tasksToCreate.length) await putMany('tasks', tasksToCreate);
+  await loadState();
+  renderAll();
+
+  const parts = [`${tasksToCreate.length} ${tasksToCreate.length === 1 ? 'tarea creada' : 'tareas creadas'}`];
+  if (existingCount) parts.push(`${existingCount} ${existingCount === 1 ? 'ya existía' : 'ya existían'}`);
+  if (pendingScheduleCount) parts.push(`${pendingScheduleCount} ${pendingScheduleCount === 1 ? 'pendiente' : 'pendientes'} de programar`);
+  showToast(`Semana creada · ${parts.join(' · ')}`);
+  if (tasksToCreate.length) touchCloudDirty();
+}
 
 function taskMatchesPlanAssignee(task) {
   const selected = els.planAssigneeFilter.value || 'all';

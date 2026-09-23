@@ -322,7 +322,8 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
 .routine-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .routine-title-row strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .routine-actions { display: flex; align-items: center; gap: 4px; }
-.routine-create { min-height: 36px; padding: 0 12px; font-size: 12px; }
+.routine-create, .routine-create-week { min-height: 36px; padding: 0 12px; font-size: 12px; white-space: nowrap; }
+.routine-create-week { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); }
 .recurrence-badge { color: var(--accent); font-weight: 780; }
 .task-dialog form { max-height: min(88vh, 760px); overflow: auto; }
 
@@ -338,7 +339,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
   .nav-item small { font-size: 9px; }
   .routine-stats { grid-template-columns: 1fr; }
   .routine-card { padding: 12px; }
-  .routine-actions { display: grid; grid-template-columns: 1fr auto auto; }
+  .routine-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: 6px; }
 }
 
 
