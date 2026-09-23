@@ -12,7 +12,7 @@ const LS_CLOUD_DIRTY = 'hometasks-sync-dirty';
 const LS_DEVICE_ID = 'hometasks-device-id';
 const LS_LAST_SYNC_ATTEMPT = 'hometasks-sync-last-attempt';
 const LS_LAST_SYNC_RESULT = 'hometasks-sync-last-result';
-const LS_LAST_AUTO_BACKUP = 'hometasks-v9-last-auto-backup';
+const LS_LAST_AUTO_BACKUP = 'hometasks-v10-last-auto-backup';
 const AUTO_BACKUP_RETENTION = 7;
 const TOMBSTONE_RETENTION_DAYS = 180;
 const LS_LOCAL_REVISION = 'hometasks-local-revision';
@@ -131,17 +131,18 @@ function normalizeRooms(items = []) {
   });
 }
 
+const FLOORPLAN_IMAGE_PATH = './assets/plano-isometrico-v10.png';
 const floorLayout = [
-  { id: 'entry', type: 'rect', x: 35, y: 40, w: 175, h: 170, labelX: 122, labelY: 116, bubbleX: 122, bubbleY: 158, base: 'room-base-a' },
-  { id: 'kitchen', type: 'rect', x: 220, y: 40, w: 380, h: 290, labelX: 410, labelY: 160, bubbleX: 410, bubbleY: 205, base: 'room-base-b' },
-  { id: 'balcony', type: 'rect', x: 610, y: 40, w: 145, h: 145, labelX: 682, labelY: 98, bubbleX: 682, bubbleY: 140, base: 'room-base-c', labelSize: 'small' },
-  { id: 'bath2', type: 'rect', x: 610, y: 185, w: 145, h: 145, labelX: 682, labelY: 238, bubbleX: 682, bubbleY: 280, base: 'room-base-c', labelSize: 'small' },
-  { id: 'lucia', type: 'rect', x: 770, y: 185, w: 240, h: 220, labelX: 890, labelY: 270, bubbleX: 890, bubbleY: 316, base: 'room-base-a', labelSize: 'small' },
-  { id: 'living', type: 'path', d: 'M35 225 H210 V340 H435 V690 H35 Z', labelX: 235, labelY: 430, bubbleX: 235, bubbleY: 480, base: 'room-base-a' },
-  { id: 'hall', type: 'rect', x: 445, y: 340, w: 310, h: 100, labelX: 600, labelY: 385, bubbleX: 600, bubbleY: 420, base: 'room-base-neutral' },
-  { id: 'pablo', type: 'rect', x: 445, y: 450, w: 270, h: 240, labelX: 580, labelY: 555, bubbleX: 580, bubbleY: 603, base: 'room-base-d', labelSize: 'small' },
-  { id: 'bath1', type: 'rect', x: 770, y: 415, w: 240, h: 120, labelX: 890, labelY: 458, bubbleX: 890, bubbleY: 496, base: 'room-base-c', labelSize: 'small' },
-  { id: 'master', type: 'rect', x: 770, y: 545, w: 240, h: 145, labelX: 890, labelY: 610, bubbleX: 890, bubbleY: 652, base: 'room-base-e', labelSize: 'small' },
+  { id: 'entry', type: 'rect', x: 156, y: 172, w: 166, h: 173, labelX: 240, labelY: 326, bubbleX: 286, bubbleY: 188 },
+  { id: 'kitchen', type: 'rect', x: 330, y: 62, w: 401, h: 377, labelX: 520, labelY: 396, bubbleX: 647, bubbleY: 110 },
+  { id: 'balcony', type: 'rect', x: 724, y: 40, w: 154, h: 178, labelX: 800, labelY: 204, bubbleX: 850, bubbleY: 68, labelSize: 'small' },
+  { id: 'bath2', type: 'rect', x: 592, y: 224, w: 295, h: 206, labelX: 742, labelY: 410, bubbleX: 848, bubbleY: 285, labelSize: 'small' },
+  { id: 'lucia', type: 'rect', x: 900, y: 230, w: 349, h: 299, labelX: 1070, labelY: 510, bubbleX: 1192, bubbleY: 258, labelSize: 'small' },
+  { id: 'living', type: 'rect', x: 128, y: 355, w: 391, h: 486, labelX: 282, labelY: 806, bubbleX: 164, bubbleY: 587 },
+  { id: 'hall', type: 'rect', x: 522, y: 428, w: 419, h: 95, labelX: 730, labelY: 477, bubbleX: 898, bubbleY: 446, base: 'room-base-neutral' },
+  { id: 'pablo', type: 'rect', x: 523, y: 526, w: 307, h: 376, labelX: 678, labelY: 886, bubbleX: 553, bubbleY: 640, labelSize: 'small' },
+  { id: 'bath1', type: 'rect', x: 898, y: 527, w: 350, h: 160, labelX: 1038, labelY: 684, bubbleX: 1182, bubbleY: 588, labelSize: 'small' },
+  { id: 'master', type: 'rect', x: 815, y: 676, w: 434, h: 249, labelX: 1018, labelY: 898, bubbleX: 1188, bubbleY: 740, labelSize: 'small' },
 ];
 
 const legacyRoomMap = {
@@ -656,45 +657,26 @@ function renderFloorPlan() {
     const countMarkup = stats.count > 0 ? `<circle class="count-bubble" cx="${layout.bubbleX}" cy="${layout.bubbleY}" r="18"></circle><text class="count-number" x="${layout.bubbleX}" y="${layout.bubbleY}">${stats.count}</text>` : '';
     return `
       <g class="floor-room ${stateClass}" data-room-id="${room.id}" role="button" tabindex="0" aria-label="${escapeHTML(room.name)}: ${statusText}">
-        ${renderShape(layout, `room-shadow ${floorSurfaceClass(room.id)}`)}
-        ${renderShape(layout, `room-shape ${floorSurfaceClass(room.id)}`)}
-        ${renderShape(layout, 'room-inner-bevel')}
-        ${renderShape(layout, 'room-overlay')}
-        ${roomFurnitureMarkup(room.id)}
+        ${renderShape(layout, 'room-outline')}
+        ${renderShape(layout, 'room-hit-area')}
         ${labelMarkup(room, layout)}
         ${countMarkup}
       </g>`;
   }).join('');
 
   els.floorPlan.innerHTML = `
-    <svg viewBox="0 0 1045 725" role="img" aria-label="Plano interactivo de la vivienda">
+    <svg viewBox="0 0 1366 1024" role="img" aria-label="Plano interactivo de la vivienda">
       <defs>
-        <linearGradient id="woodFurniture" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b28b63"/><stop offset=".5" stop-color="#8f6947"/><stop offset="1" stop-color="#6f4e35"/></linearGradient>
-        <linearGradient id="cabinetGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f1ede6"/><stop offset="1" stop-color="#bbb9b4"/></linearGradient>
-        <linearGradient id="fabricGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#cbc8c0"/><stop offset="1" stop-color="#8f918c"/></linearGradient>
-        <linearGradient id="bedGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#efede8"/><stop offset="1" stop-color="#c7c3bb"/></linearGradient>
-        <radialGradient id="plantGrad" cx="35%" cy="30%"><stop offset="0" stop-color="#6e9b57"/><stop offset="1" stop-color="#31592d"/></radialGradient>
-        <pattern id="woodFloor" width="76" height="22" patternUnits="userSpaceOnUse">
-          <rect width="76" height="22" fill="#dbc6a5"></rect>
-          <path d="M0 21.5H76M24 0v22M58 0v22" stroke="#bca37e" stroke-width="1" opacity=".48"></path>
-          <path d="M3 7c13-5 28-5 42 0M31 16c12-4 26-4 40 0" stroke="#c3aa85" stroke-width="1.2" opacity=".52" fill="none"></path>
-          <path d="M8 2h10M49 11h14" stroke="#ead9bd" stroke-width="1" opacity=".65"/>
-        </pattern>
-        <pattern id="kitchenFloor" width="54" height="27" patternUnits="userSpaceOnUse">
-          <rect width="54" height="27" fill="#d7c6aa"></rect><path d="M0 26.5H54M27 0v27" stroke="#a99476" opacity=".46"/><path d="M3 6H24M31 18H49" stroke="#eadbc3" opacity=".55"/>
-        </pattern>
-        <pattern id="tileFloor" width="38" height="38" patternUnits="userSpaceOnUse">
-          <rect width="38" height="38" fill="#c0c8cd"></rect><path d="M38 0H0V38" fill="none" stroke="#8e9ba3" stroke-width="1.3" opacity=".58"></path><path d="M3 3H35" stroke="#e2e7e9" opacity=".5"/>
-        </pattern>
-        <pattern id="balconyFloor" width="30" height="30" patternUnits="userSpaceOnUse">
-          <rect width="30" height="30" fill="#a5a79c"></rect><path d="M0 15H30M15 0V30" stroke="#797e75" opacity=".5"></path><path d="M2 2H28" stroke="#c8cabf" opacity=".34"/>
-        </pattern>
-        <filter id="floorShadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#000" flood-opacity=".38"/></filter>
-        <filter id="furnitureShadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="3" stdDeviation="2.8" flood-color="#0a1118" flood-opacity=".35"/></filter>
+        <filter id="photoPlanShadow" x="-8%" y="-8%" width="116%" height="116%">
+          <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#050a0f" flood-opacity=".28"/>
+        </filter>
       </defs>
-      <rect class="floor-scene" x="10" y="10" width="1025" height="695" rx="28"></rect>
-      <g filter="url(#floorShadow)">${roomsMarkup}</g>
-      <text class="floor-caption" x="522" y="713">Plano interactivo · toca una estancia para ver sus tareas</text>
+      <rect class="floor-photo-backdrop" x="10" y="10" width="1346" height="1004" rx="36"></rect>
+      <g filter="url(#photoPlanShadow)">
+        <image href="${FLOORPLAN_IMAGE_PATH}" x="0" y="0" width="1366" height="1024" preserveAspectRatio="xMidYMid meet"></image>
+      </g>
+      ${roomsMarkup}
+      <text class="floor-caption" x="683" y="1002">Plano interactivo · toca una estancia para ver sus tareas</text>
     </svg>`;
 
   els.floorPlan.querySelectorAll('.floor-room').forEach(roomEl => {
@@ -3285,7 +3267,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V9.0 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3302,7 +3284,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V9.0 restablecida');
+    showToast('V10.0 restablecida');
   });
 
   window.addEventListener('online', updateConnection);

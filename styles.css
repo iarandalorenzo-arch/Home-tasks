@@ -924,3 +924,51 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
   .today-map-card .floor-plan-realistic svg { min-width: 720px; }
   .calendar-task.compact strong { font-size: 8.5px; }
 }
+
+
+/* V10.0.0 - plano isométrico real integrado */
+.floor-plan-realistic {
+  background: radial-gradient(ellipse at 50% 35%, #edf2f7 0%, #dde6f0 46%, #cfdbe8 100%);
+  box-shadow: inset 0 0 0 1px rgba(108,130,154,.18), 0 18px 44px rgba(40,61,84,.12);
+}
+.floor-plan-realistic svg { width: 100%; max-width: 1380px; }
+.floor-photo-backdrop { fill: rgba(255,255,255,.38); stroke: rgba(142,162,183,.42); stroke-width: 1.5; }
+.floor-room { outline: none; }
+.floor-room .room-outline {
+  fill: transparent;
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+  transition: opacity 140ms ease, fill 140ms ease, stroke 140ms ease;
+}
+.floor-room .room-hit-area {
+  fill: rgba(255,255,255,.001);
+  stroke: rgba(70,93,119,.28);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  opacity: 0;
+  transition: opacity 140ms ease, stroke 140ms ease, stroke-width 140ms ease;
+}
+.floor-room:hover .room-hit-area,
+.floor-room:focus .room-hit-area { opacity: 1; stroke: rgba(47,83,120,.58); stroke-width: 3; }
+.floor-room:hover .room-outline,
+.floor-room:focus .room-outline { opacity: .9; }
+.floor-room.room-state-ok .room-outline { stroke: rgba(82,168,118,.42); fill: rgba(82,168,118,.04); opacity: .18; }
+.floor-room.room-state-pending .room-outline { stroke: rgba(230,170,51,.95); fill: rgba(255,205,88,.08); opacity: .82; }
+.floor-room.room-state-overdue .room-outline { stroke: rgba(222,95,102,.98); fill: rgba(222,95,102,.10); opacity: .9; }
+.floor-plan-realistic .floor-label-chip rect {
+  fill: rgba(16,24,33,.90);
+  stroke: rgba(255,255,255,.22);
+  stroke-width: 1.2;
+  filter: drop-shadow(0 3px 7px rgba(0,0,0,.28));
+}
+.floor-plan-realistic .floor-label-chip-text { fill: #f7fbff; font-size: 14px; }
+.floor-plan-realistic .count-bubble {
+  fill: #4d8dff;
+  stroke: rgba(255,255,255,.92);
+  stroke-width: 3;
+  filter: drop-shadow(0 3px 6px rgba(0,0,0,.26));
+}
+.floor-plan-realistic .room-state-overdue .count-bubble { fill: #e85f66; }
+.floor-plan-realistic .count-number { fill: #fff; font-size: 14px; font-weight: 900; dominant-baseline: middle; text-anchor: middle; pointer-events: none; }
+.floor-plan-realistic .floor-caption { fill: #61758c; font-size: 9px; }

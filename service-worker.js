@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hometasks-v9-000';
+const CACHE_NAME = 'hometasks-v10-000';
 const APP_SHELL = [
   './',
   './index.html',
@@ -7,7 +7,8 @@ const APP_SHELL = [
   './db.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  './assets/plano-isometrico-v10.png'
 ];
 
 self.addEventListener('install', event => {
