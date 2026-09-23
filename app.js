@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '10.0.2';
+const APP_VERSION = '10.0.3';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -339,7 +339,13 @@ function isOverdue(task) {
 
 function roomStats(roomId) {
   const pending = state.tasks.filter(task => task.roomId === roomId && !task.completed && !isWaitingTask(task));
-  return { count: pending.length, overdue: pending.some(isOverdue) };
+  const today = todayISO();
+  const todayPending = pending.filter(task => task.dueDate === today);
+  return {
+    count: pending.length,
+    todayCount: todayPending.length,
+    overdue: pending.some(isOverdue)
+  };
 }
 
 async function ensureV1Data() {
@@ -649,7 +655,11 @@ function roomFurnitureMarkup(roomId) {
 
 function floorRoomCardMarkup(room, layout, stats) {
   const count = Math.max(0, Number(stats?.count) || 0);
-  const stateClass = stats?.overdue ? 'room-card-overdue' : count >= 4 ? 'room-card-busy' : count > 0 ? 'room-card-pending' : 'room-card-ok';
+  const todayCount = Math.max(0, Number(stats?.todayCount) || 0);
+  // V10.0.3: el color de la tarjeta representa la carga de HOY.
+  // Las tareas futuras siguen apareciendo en el contador total, pero no cambian el color.
+  // Una tarea vencida sí mantiene la estancia en rojo porque no está al día.
+  const stateClass = stats?.overdue ? 'room-card-overdue' : todayCount >= 4 ? 'room-card-busy' : todayCount > 0 ? 'room-card-pending' : 'room-card-ok';
   const name = String(room?.name || 'Estancia');
   const cardWidth = Math.max(132, Math.min(270, name.length * 8.4 + 82));
   const cardHeight = 48;
@@ -3387,7 +3397,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.2 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.3 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3404,7 +3414,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V10.0.2 restablecida');
+    showToast('V10.0.3 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
