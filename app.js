@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '10.0.5';
+const APP_VERSION = '10.0.6';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -715,22 +715,22 @@ function renderFloorPlan() {
     return floorRoomCardMarkup(room, layout, stats);
   }).join('');
 
+  const crop = { x: 110, y: 34, width: 1120, height: 905 };
+
   els.floorPlan.innerHTML = `
-    <svg viewBox="0 0 1366 1024" role="img" aria-label="Plano interactivo de la vivienda">
+    <svg viewBox="${crop.x} ${crop.y} ${crop.width} ${crop.height}" role="img" aria-label="Plano interactivo de la vivienda">
       <defs>
         <filter id="photoPlanShadow" x="-8%" y="-8%" width="116%" height="116%">
-          <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#050a0f" flood-opacity=".28"/>
+          <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#050a0f" flood-opacity=".22"/>
         </filter>
         <filter id="roomCardShadow" x="-25%" y="-40%" width="150%" height="180%">
-          <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#07111b" flood-opacity=".36"/>
+          <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#07111b" flood-opacity=".34"/>
         </filter>
       </defs>
-      <rect class="floor-photo-backdrop" x="10" y="10" width="1346" height="1004" rx="36"></rect>
       <g filter="url(#photoPlanShadow)">
         <image href="${FLOORPLAN_IMAGE_PATH}" x="0" y="0" width="1366" height="1024" preserveAspectRatio="xMidYMid meet"></image>
       </g>
       <g class="floor-room-cards" filter="url(#roomCardShadow)">${cardsMarkup}</g>
-      <text class="floor-caption" x="683" y="1002">Plano interactivo · toca una tarjeta para ver las tareas de esa estancia</text>
     </svg>`;
 
   els.floorPlan.querySelectorAll('.floor-room-card').forEach(card => {
@@ -3713,7 +3713,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.5 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.6 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3730,7 +3730,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V10.0.5 restablecida');
+    showToast('V10.0.6 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
