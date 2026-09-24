@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '10.0.8';
+const APP_VERSION = '10.0.9';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -91,7 +91,7 @@ const weekStartForOffset = offset => addDaysToDate(mondayOfWeek(new Date()), off
 
 const PLAN_START_MINUTES = 6 * 60;
 const PLAN_END_MINUTES = 24 * 60;
-const PLAN_SLOT_MINUTES = 15;
+const PLAN_SLOT_MINUTES = 5;
 const DEFAULT_TASK_DURATION = 30;
 const NA_ROOM_ID = 'na';
 const WEEKDAY_KEYS = ['sun','mon','tue','wed','thu','fri','sat'];
@@ -1444,6 +1444,11 @@ async function saveRoutine(event) {
   const existing = state.editingRoutineId ? state.templates.find(item => item.id === state.editingRoutineId) : null;
   if (els.routineAutoGenerate.checked && els.routineRecurrence.value === 'none') { showToast('La generación automática necesita una repetición'); return; }
   if (existing && els.routineNextTemplate.value === existing.id) { showToast('Una rutina no puede encadenarse consigo misma'); return; }
+  const routineStartMinute = timeToMinutes(els.routineDueTime.value);
+  if (els.routineDueTime.value && (routineStartMinute === null || routineStartMinute % PLAN_SLOT_MINUTES !== 0)) {
+    showToast('La hora habitual debe ser múltiplo de 5 minutos.');
+    return;
+  }
   const template = {
     ...(existing || {}),
     id: existing?.id || makeId(),
@@ -1879,6 +1884,16 @@ function validateTaskScheduleForm() {
   const date = els.taskDueDate.value || '';
   const time = els.taskDueTime.value || '';
   const duration = durationState.value;
+
+  if (time) {
+    const startMinute = timeToMinutes(time);
+    if (startMinute === null || startMinute % PLAN_SLOT_MINUTES !== 0) {
+      const reason = 'La hora de inicio debe ser múltiplo de 5 minutos.';
+      els.taskScheduleStatus.className = 'schedule-status warning';
+      els.taskScheduleStatus.textContent = reason;
+      return { ok: false, reason };
+    }
+  }
 
   if (!assigneeId) {
     els.taskScheduleStatus.className = 'schedule-status neutral';
@@ -3713,7 +3728,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.8 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.9 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3730,7 +3745,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V10.0.8 restablecida');
+    showToast('V10.0.9 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
