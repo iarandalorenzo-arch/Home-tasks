@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '10.0.3';
+const APP_VERSION = '10.0.4';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -290,7 +290,7 @@ function cacheElements() {
     'routineRoomFilter','routineSearch','routineList','newRoutineButton','templateCount','activeRoutineCount',
     'planPrevWeek','planTodayWeek','planNextWeek','planWeekLabel','planAssigneeFilter','weeklyPlanner','planBacklog','workloadSummary',
     'houseNameInput','saveHouseNameButton','addUserForm','newUserName','userList','roomSettingsList','saveRoomNamesButton',
-    'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskDueTime','taskDurationMinutes','findFreeSlotsButton','taskScheduleStatus','freeSlotSuggestions','taskReminderMinutes','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','taskNextTemplate','taskNextDelay','taskNextDelayWrap','saveTaskButton','closeDialogButton','cancelDialogButton',
+    'taskDialog','taskForm','taskDialogEyebrow','taskDialogTitle','taskTitle','taskRoom','taskAssignee','taskDueDate','taskDueTime','taskDurationMinutes','findFreeSlotsButton','taskScheduleStatus','freeSlotSuggestions','taskReminderMinutes','taskPriority','taskRecurrence','taskRecurrenceDays','taskRecurrenceDaysWrap','taskNextTemplate','taskNextDelay','taskNextDelayWrap','saveTaskButton','deleteTaskDialogButton','closeDialogButton','cancelDialogButton',
     'routineDialog','routineForm','routineDialogEyebrow','routineDialogTitle','routineTitle','routineRoom','routineAssignee','routinePriority','routineDueTime','routineDurationMinutes','routineReminderMinutes','routineRecurrence','routineRecurrenceDays','routineRecurrenceDaysWrap','routineNextTemplate','routineNextDelay','routineNextDelayWrap','routineAutoGenerate','routineNextRunDate','routineNextRunDateWrap','closeRoutineDialogButton','cancelRoutineDialogButton',
     'workScheduleDialog','workScheduleForm','workScheduleTitle','workScheduleDays','closeWorkScheduleButton','cancelWorkScheduleButton','resetButton','themeButton','fullscreenButton','tabletSettingsCard','tabletStatusPill','tabletModeToggle','tabletViewportStatus','tabletFullscreenStatus','tabletFullscreenButton','tabletModeHelp','toast','offlineReady','installButton','installHelp','forceAppUpdateButton','appVersionDisplay','lastForcedUpdate','syncSettingsCard',
     'notificationSettingsCard','notificationStatusPill','notificationPermissionStatus','requestNotificationPermissionButton','testNotificationButton','notificationsEnabledToggle','dailySummaryToggle','dailySummaryTime','overdueNotificationToggle','notificationHelpText',
@@ -341,10 +341,14 @@ function roomStats(roomId) {
   const pending = state.tasks.filter(task => task.roomId === roomId && !task.completed && !isWaitingTask(task));
   const today = todayISO();
   const todayPending = pending.filter(task => task.dueDate === today);
+  const overduePreviousDays = pending.some(task => task.dueDate && task.dueDate < today);
+  const overdueToday = todayPending.some(task => isOverdue(task));
   return {
     count: pending.length,
     todayCount: todayPending.length,
-    overdue: pending.some(isOverdue)
+    overduePreviousDays,
+    overdueToday,
+    overdue: overduePreviousDays || overdueToday
   };
 }
 
@@ -654,14 +658,15 @@ function roomFurnitureMarkup(roomId) {
 }
 
 function floorRoomCardMarkup(room, layout, stats) {
-  const count = Math.max(0, Number(stats?.count) || 0);
+  const totalCount = Math.max(0, Number(stats?.count) || 0);
   const todayCount = Math.max(0, Number(stats?.todayCount) || 0);
-  // V10.0.3: el color de la tarjeta representa la carga de HOY.
-  // Las tareas futuras siguen apareciendo en el contador total, pero no cambian el color.
-  // Una tarea vencida sí mantiene la estancia en rojo porque no está al día.
-  const stateClass = stats?.overdue ? 'room-card-overdue' : todayCount >= 4 ? 'room-card-busy' : todayCount > 0 ? 'room-card-pending' : 'room-card-ok';
+  // V10.0.4: el color representa vencimientos, no el volumen total de pendientes.
+  // Rojo = existen tareas pendientes de días anteriores.
+  // Naranja = no hay atrasos anteriores, pero sí una tarea de hoy cuya hora ya ha vencido.
+  // Verde = no hay tareas vencidas, aunque existan tareas para hoy o fechas futuras.
+  const stateClass = stats?.overduePreviousDays ? 'room-card-overdue' : stats?.overdueToday ? 'room-card-today-overdue' : 'room-card-ok';
   const name = String(room?.name || 'Estancia');
-  const cardWidth = Math.max(132, Math.min(270, name.length * 8.4 + 82));
+  const cardWidth = Math.max(142, Math.min(286, name.length * 8.4 + 94));
   const cardHeight = 48;
   const x = layout.labelX - cardWidth / 2;
   const y = layout.labelY - cardHeight / 2;
@@ -669,12 +674,19 @@ function floorRoomCardMarkup(room, layout, stats) {
   const badgeX = x + cardWidth - 35;
   const textX = x + 16;
   const arrowX = x + cardWidth - 13;
+  const totalText = String(totalCount);
+  const totalWidth = totalText.length <= 1 ? 23 : totalText.length === 2 ? 29 : 37;
+  const totalX = x + cardWidth - totalWidth + 4;
+  const totalY = y - 9;
   return `
-    <g class="floor-room-card ${stateClass}" data-room-id="${room.id}" role="button" tabindex="0" aria-label="${escapeHTML(room.name)}: ${count} tarea${count === 1 ? '' : 's'} pendiente${count === 1 ? '' : 's'}">
+    <g class="floor-room-card ${stateClass}" data-room-id="${room.id}" role="button" tabindex="0" aria-label="${escapeHTML(room.name)}: ${todayCount} pendiente${todayCount === 1 ? '' : 's'} para hoy, ${totalCount} pendiente${totalCount === 1 ? '' : 's'} en total">
+      <title>${escapeHTML(room.name)} · Hoy: ${todayCount} · Total pendiente: ${totalCount}</title>
       <rect class="room-card-bg" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${cardWidth.toFixed(1)}" height="${cardHeight}" rx="18"></rect>
       <text class="room-card-name" x="${textX.toFixed(1)}" y="${layout.labelY + 1}" dominant-baseline="middle">${escapeHTML(name)}</text>
       <circle class="room-card-count-bg" cx="${badgeX.toFixed(1)}" cy="${layout.labelY}" r="${badgeR}"></circle>
-      <text class="room-card-count" x="${badgeX.toFixed(1)}" y="${layout.labelY + 1}" dominant-baseline="middle" text-anchor="middle">${count}</text>
+      <text class="room-card-count" x="${badgeX.toFixed(1)}" y="${layout.labelY + 1}" dominant-baseline="middle" text-anchor="middle">${todayCount}</text>
+      <rect class="room-card-total-bg" x="${totalX.toFixed(1)}" y="${totalY.toFixed(1)}" width="${totalWidth}" height="22" rx="11"></rect>
+      <text class="room-card-total" x="${(totalX + totalWidth / 2).toFixed(1)}" y="${(totalY + 11.5).toFixed(1)}" dominant-baseline="middle" text-anchor="middle">${totalText}</text>
       <text class="room-card-arrow" x="${arrowX.toFixed(1)}" y="${layout.labelY + 1}" dominant-baseline="middle" text-anchor="middle">›</text>
     </g>`;
 }
@@ -1017,6 +1029,44 @@ function renderActiveRoomHint() {
   els.clearRoomFilterButton.hidden = false;
 }
 
+function taskItemMarkup(task) {
+  const room = roomById(task.roomId)?.name || 'Sin ubicación';
+  const person = userName(task.assigneeId, task.assigneeName);
+  const nextTemplate = task.nextTemplateId ? templateById(task.nextTemplateId) : null;
+  const waiting = isWaitingTask(task);
+  return `<article class="task-item ${task.completed ? 'completed' : ''}${waiting ? ' waiting' : ''}" data-task-id="${task.id}">
+    <button class="task-check" type="button" aria-label="${task.completed ? 'Reabrir' : 'Completar'} ${escapeHTML(task.title)}" ${waiting ? 'disabled' : ''}>${task.completed ? '✓' : waiting ? '⏳' : ''}</button>
+    <div class="task-main">
+      <div class="task-title-row"><span class="task-title">${escapeHTML(task.title)}</span>${task.priority === 'high' ? '<i class="priority-dot" title="Prioridad alta"></i>' : ''}</div>
+      <div class="task-meta">
+        <span>${escapeHTML(room)}</span>
+        <span>${escapeHTML(person)}</span>
+        <span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}${task.dueTime ? ` · ${escapeHTML(task.dueTime)}` : ''}</span>
+        ${reminderText(task) ? `<span class="reminder-badge">🔔 ${escapeHTML(reminderText(task))}</span>` : ''}
+        ${(task.recurrence && task.recurrence !== 'none') ? `<span class="recurrence-badge">↻ ${escapeHTML(recurrenceText(task))}</span>` : ''}
+        ${waiting ? `<span class="waiting-badge">⏳ ${escapeHTML(availabilityText(task))}</span>` : ''}
+        ${nextTemplate ? `<span class="chain-badge">→ ${escapeHTML(nextTemplate.title)}</span>` : ''}
+      </div>
+    </div>
+    <div class="task-actions">
+      ${!task.completed ? `<select class="task-postpone" aria-label="Aplazar tarea"><option value="">Aplazar</option><option value="1">+1d</option><option value="2">+2d</option><option value="7">+7d</option><option value="none">Sin fecha</option></select>` : ''}
+      <button class="task-action edit" type="button" aria-label="Editar tarea" title="Editar">✎</button>
+      <button class="task-action delete" type="button" aria-label="Eliminar tarea" title="Eliminar">×</button>
+    </div>
+  </article>`;
+}
+
+function taskDayGroupTitle(dateString) {
+  if (!dateString) return 'Sin asignar fecha';
+  const date = new Date(`${dateString}T12:00:00`);
+  const fullDate = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
+  if (dateString === todayISO()) return `Hoy · ${fullDate}`;
+  if (dateString === addDaysISO(1)) return `Mañana · ${fullDate}`;
+  if (dateString === addDaysISO(-1)) return `Ayer · ${fullDate}`;
+  const weekday = new Intl.DateTimeFormat('es-ES', { weekday: 'long' }).format(date);
+  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} · ${fullDate}`;
+}
+
 function renderTasks() {
   renderActiveRoomHint();
   const tasks = getFilteredTasks();
@@ -1025,31 +1075,31 @@ function renderTasks() {
     return;
   }
 
-  els.taskList.innerHTML = tasks.map(task => {
-    const room = roomById(task.roomId)?.name || 'Sin ubicación';
-    const person = userName(task.assigneeId, task.assigneeName);
-    const nextTemplate = task.nextTemplateId ? templateById(task.nextTemplateId) : null;
-    const waiting = isWaitingTask(task);
-    return `<article class="task-item ${task.completed ? 'completed' : ''}${waiting ? ' waiting' : ''}" data-task-id="${task.id}">
-      <button class="task-check" type="button" aria-label="${task.completed ? 'Reabrir' : 'Completar'} ${escapeHTML(task.title)}" ${waiting ? 'disabled' : ''}>${task.completed ? '✓' : waiting ? '⏳' : ''}</button>
-      <div class="task-main">
-        <div class="task-title-row"><span class="task-title">${escapeHTML(task.title)}</span>${task.priority === 'high' ? '<i class="priority-dot" title="Prioridad alta"></i>' : ''}</div>
-        <div class="task-meta">
-          <span>${escapeHTML(room)}</span>
-          <span>${escapeHTML(person)}</span>
-          <span class="task-date ${isOverdue(task) ? 'overdue' : ''}">${formatDate(task.dueDate)}${task.dueTime ? ` · ${escapeHTML(task.dueTime)}` : ''}</span>
-          ${reminderText(task) ? `<span class="reminder-badge">🔔 ${escapeHTML(reminderText(task))}</span>` : ''}
-          ${(task.recurrence && task.recurrence !== 'none') ? `<span class="recurrence-badge">↻ ${escapeHTML(recurrenceText(task))}</span>` : ''}
-          ${waiting ? `<span class="waiting-badge">⏳ ${escapeHTML(availabilityText(task))}</span>` : ''}
-          ${nextTemplate ? `<span class="chain-badge">→ ${escapeHTML(nextTemplate.title)}</span>` : ''}
-        </div>
-      </div>
-      <div class="task-actions">
-        ${!task.completed ? `<select class="task-postpone" aria-label="Aplazar tarea"><option value="">Aplazar</option><option value="1">+1d</option><option value="2">+2d</option><option value="7">+7d</option><option value="none">Sin fecha</option></select>` : ''}
-        <button class="task-action edit" type="button" aria-label="Editar tarea" title="Editar">✎</button>
-        <button class="task-action delete" type="button" aria-label="Eliminar tarea" title="Eliminar">×</button>
-      </div>
-    </article>`;
+  const sorted = [...tasks].sort((a, b) => {
+    const aDate = a.dueDate || '9999-99-99';
+    const bDate = b.dueDate || '9999-99-99';
+    return aDate.localeCompare(bDate)
+      || (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99')
+      || (a.priority === b.priority ? 0 : a.priority === 'high' ? -1 : 1)
+      || Number(a.createdAt || 0) - Number(b.createdAt || 0);
+  });
+  const groups = new Map();
+  sorted.forEach(task => {
+    const key = task.dueDate || '__undated__';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(task);
+  });
+
+  const today = todayISO();
+  els.taskList.innerHTML = [...groups.entries()].map(([key, groupTasks]) => {
+    const date = key === '__undated__' ? '' : key;
+    const isPast = !!date && date < today;
+    const groupClass = !date ? ' undated' : isPast ? ' overdue-day' : date === today ? ' today-day' : '';
+    const countLabel = `${groupTasks.length} tarea${groupTasks.length === 1 ? '' : 's'}`;
+    return `<section class="task-day-group${groupClass}">
+      <div class="task-day-heading"><div><span class="task-day-kicker">${!date ? 'Pendientes' : isPast ? 'Fecha vencida' : date === today ? 'Hoy' : 'Programadas'}</span><h3>${escapeHTML(taskDayGroupTitle(date))}</h3></div><span class="task-day-count">${countLabel}</span></div>
+      <div class="task-day-items">${groupTasks.map(taskItemMarkup).join('')}</div>
+    </section>`;
   }).join('');
 
   els.taskList.querySelectorAll('.task-item').forEach(item => {
@@ -1061,30 +1111,43 @@ function renderTasks() {
   });
 }
 
-function statsPeriodDays() {
-  const value = els.statsPeriodFilter?.value || localStorage.getItem(LS_STATS_PERIOD) || '30';
-  if (value === 'all') return null;
-  const days = Number(value);
-  return Number.isFinite(days) && days > 0 ? days : 30;
+function currentStatsPeriodKey() {
+  const value = els.statsPeriodFilter?.value || localStorage.getItem(LS_STATS_PERIOD) || 'month';
+  return ['today', 'week', 'month'].includes(value) ? value : 'month';
 }
 
-function periodStartTimestamp(days) {
-  if (!days) return 0;
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - (days - 1));
-  return start.getTime();
+function statsPeriodRange(periodKey = currentStatsPeriodKey()) {
+  const now = new Date();
+  let start = new Date(now);
+  let end = new Date(now);
+  if (periodKey === 'today') {
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+  } else if (periodKey === 'week') {
+    start = mondayOfWeek(now);
+    start.setHours(0, 0, 0, 0);
+    end = addDaysToDate(start, 6);
+    end.setHours(23, 59, 59, 999);
+  } else {
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  }
+  return { periodKey, start, end };
 }
 
 function historyForStatsPeriod() {
-  const days = statsPeriodDays();
-  const start = periodStartTimestamp(days);
-  return state.history.filter(item => Number(item.completedAt || 0) >= start);
+  const { start, end } = statsPeriodRange();
+  return state.history.filter(item => {
+    const time = Number(item.completedAt || 0);
+    return time >= start.getTime() && time <= end.getTime();
+  });
 }
 
 function statsPeriodText() {
-  const days = statsPeriodDays();
-  return days ? `Últimos ${days} días` : 'Todo el histórico';
+  const periodKey = currentStatsPeriodKey();
+  if (periodKey === 'today') return 'Hoy';
+  if (periodKey === 'week') return 'Semana en curso';
+  return 'Mes en curso';
 }
 
 function getFilteredHistory() {
@@ -1098,50 +1161,50 @@ function getFilteredHistory() {
   });
 }
 
-function buildActivityBuckets(history, periodDaysValue) {
-  const now = new Date();
-  const end = new Date(now);
-  end.setHours(23, 59, 59, 999);
-  let start;
-  let bucketCount;
-
-  if (periodDaysValue) {
-    start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - (periodDaysValue - 1));
-    bucketCount = periodDaysValue <= 7 ? 7 : periodDaysValue <= 30 ? 6 : 9;
-  } else {
-    const earliest = history.length ? Math.min(...history.map(item => Number(item.completedAt || Date.now()))) : Date.now() - 29 * 86400000;
-    start = new Date(earliest);
-    start.setHours(0, 0, 0, 0);
-    bucketCount = 10;
+function buildActivityBuckets(history, periodKey = currentStatsPeriodKey()) {
+  const { start } = statsPeriodRange(periodKey);
+  if (periodKey === 'today') {
+    const bucketHours = 3;
+    const bucketCount = 24 / bucketHours;
+    const counts = Array(bucketCount).fill(0);
+    history.forEach(item => {
+      const date = new Date(Number(item.completedAt || 0));
+      if (localISO(date) !== todayISO()) return;
+      counts[Math.min(bucketCount - 1, Math.floor(date.getHours() / bucketHours))] += 1;
+    });
+    return counts.map((count, index) => ({ count, label: `${String(index * bucketHours).padStart(2, '0')}h` }));
   }
 
-  const totalSpan = Math.max(86400000, end.getTime() - start.getTime() + 1);
-  const bucketSpan = totalSpan / bucketCount;
-  const counts = Array(bucketCount).fill(0);
-  history.forEach(item => {
-    const time = Number(item.completedAt || 0);
-    if (time < start.getTime() || time > end.getTime()) return;
-    const index = Math.min(bucketCount - 1, Math.max(0, Math.floor((time - start.getTime()) / bucketSpan)));
-    counts[index] += 1;
-  });
+  if (periodKey === 'week') {
+    const counts = Array(7).fill(0);
+    history.forEach(item => {
+      const date = new Date(Number(item.completedAt || 0));
+      const offset = Math.floor((new Date(date.getFullYear(), date.getMonth(), date.getDate()) - start) / 86400000);
+      if (offset >= 0 && offset < 7) counts[offset] += 1;
+    });
+    return counts.map((count, index) => {
+      const date = addDaysToDate(start, index);
+      const label = new Intl.DateTimeFormat('es-ES', { weekday: 'short' }).format(date).replace('.', '');
+      return { count, label };
+    });
+  }
 
-  const labelFor = index => {
-    const bucketStart = new Date(start.getTime() + bucketSpan * index);
-    if (periodDaysValue && periodDaysValue <= 7) {
-      return new Intl.DateTimeFormat('es-ES', { weekday: 'short' }).format(bucketStart).replace('.', '');
-    }
-    return new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short' }).format(bucketStart).replace('.', '');
-  };
-  return counts.map((count, index) => ({ count, label: labelFor(index) }));
+  const year = start.getFullYear();
+  const month = start.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const counts = Array(daysInMonth).fill(0);
+  history.forEach(item => {
+    const date = new Date(Number(item.completedAt || 0));
+    if (date.getFullYear() === year && date.getMonth() === month) counts[date.getDate() - 1] += 1;
+  });
+  return counts.map((count, index) => ({ count, label: String(index + 1) }));
 }
 
 function renderActivityStats() {
   if (!els.statsCompleted) return;
   const history = historyForStatsPeriod();
   const total = history.length;
-  const days = statsPeriodDays();
+  const periodKey = currentStatsPeriodKey();
   const activeDays = new Set(history.map(item => localISO(new Date(Number(item.completedAt || 0))))).size;
   const pendingTasks = state.tasks.filter(task => !task.completed && !isWaitingTask(task));
   const overdue = pendingTasks.filter(isOverdue).length;
@@ -1194,7 +1257,7 @@ function renderActivityStats() {
     </div>`;
   }).join('');
 
-  const buckets = buildActivityBuckets(history, days);
+  const buckets = buildActivityBuckets(history, periodKey);
   const maxCount = Math.max(1, ...buckets.map(bucket => bucket.count));
   els.statsTrend.innerHTML = buckets.map(bucket => {
     const height = bucket.count ? Math.max(8, Math.round(bucket.count * 100 / maxCount)) : 3;
@@ -1561,6 +1624,7 @@ function openTaskDialog(taskId = null, presetDate = null, presetAssigneeId = nul
   state.editingTaskId = taskId;
   renderFilters();
   const task = taskId ? state.tasks.find(item => item.id === taskId) : null;
+  if (els.deleteTaskDialogButton) els.deleteTaskDialogButton.hidden = !task;
 
   if (task) {
     els.taskDialogEyebrow.textContent = 'Editar actividad';
@@ -1762,6 +1826,8 @@ async function deleteTask(id) {
   const task = state.tasks.find(item => item.id === id);
   if (!task) return;
   if (!confirm(`¿Eliminar "${task.title}"?`)) return;
+  if (els.taskDialog?.open && state.editingTaskId === id) els.taskDialog.close();
+  if (state.editingTaskId === id) state.editingTaskId = null;
   await markDeleted('tasks', id);
   await remove('tasks', id);
   await closeTaskNotification(id);
@@ -3328,6 +3394,7 @@ function setupEvents() {
   els.newRoutineButton.addEventListener('click', () => openRoutineDialog());
   els.closeDialogButton.addEventListener('click', () => { state.editingTaskId = null; els.taskDialog.close(); });
   els.cancelDialogButton.addEventListener('click', () => { state.editingTaskId = null; els.taskDialog.close(); });
+  els.deleteTaskDialogButton?.addEventListener('click', () => { const id = state.editingTaskId; if (id) deleteTask(id); });
   els.taskForm.addEventListener('submit', saveTask);
   els.taskRecurrence.addEventListener('change', updateCustomRecurrenceVisibility);
   els.taskDueDate?.addEventListener('change', updateReminderControlAvailability);
@@ -3397,7 +3464,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.3 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.4 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3414,7 +3481,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V10.0.3 restablecida');
+    showToast('V10.0.4 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
@@ -3423,7 +3490,7 @@ function setupEvents() {
 
 async function init() {
   cacheElements();
-  if (els.statsPeriodFilter) els.statsPeriodFilter.value = localStorage.getItem(LS_STATS_PERIOD) || '30';
+  if (els.statsPeriodFilter) { const savedPeriod = localStorage.getItem(LS_STATS_PERIOD); els.statsPeriodFilter.value = ['today','week','month'].includes(savedPeriod) ? savedPeriod : 'month'; }
   setupTheme();
   setupTabletMode();
   updateConnection();

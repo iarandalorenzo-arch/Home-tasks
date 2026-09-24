@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V10.0.3</title>
+  <title>HomeTasks V10.0.4</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -22,7 +22,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V10.0.3 · estado diario por estancia</p>
+          <p class="subtitle">V10.0.4 · actividad por periodo, mapa diario y tareas por fecha</p>
         </div>
       </div>
       <div class="top-actions">
@@ -56,9 +56,10 @@
             </div>
             <div id="floorPlan" class="floor-plan floor-plan-realistic" aria-label="Plano interactivo de la vivienda"></div>
             <div class="legend today-map-legend">
-              <span><i class="legend-swatch ok"></i>Al día</span>
-              <span><i class="legend-swatch pending"></i>Pendientes</span>
-              <span><i class="legend-swatch overdue"></i>Vencidas</span>
+              <span><i class="legend-swatch ok"></i>Sin vencidas</span>
+              <span><i class="legend-swatch pending"></i>Vencidas hoy</span>
+              <span><i class="legend-swatch overdue"></i>Vencidas de días anteriores</span>
+              <span class="map-count-legend">Número principal: hoy · globo pequeño: total pendiente</span>
             </div>
           </article>
 
@@ -256,16 +257,15 @@
           <label class="stats-period-filter">
             <span>Periodo</span>
             <select id="statsPeriodFilter">
-              <option value="7">7 días</option>
-              <option value="30" selected>30 días</option>
-              <option value="90">90 días</option>
-              <option value="all">Todo</option>
+              <option value="today">Hoy</option>
+              <option value="week">Semana</option>
+              <option value="month" selected>Mes</option>
             </select>
           </label>
         </div>
 
         <div class="activity-kpis">
-          <article class="card activity-kpi"><span>Completadas</span><strong id="statsCompleted">0</strong><small id="statsPeriodLabel">Últimos 30 días</small></article>
+          <article class="card activity-kpi"><span>Completadas</span><strong id="statsCompleted">0</strong><small id="statsPeriodLabel">Mes en curso</small></article>
           <article class="card activity-kpi"><span>Días con actividad</span><strong id="statsActiveDays">0</strong><small>con al menos una tarea</small></article>
           <article class="card activity-kpi"><span>Pendientes activas</span><strong id="statsPending">0</strong><small>ahora mismo</small></article>
           <article class="card activity-kpi danger"><span>Vencidas</span><strong id="statsOverdue">0</strong><small>requieren atención</small></article>
@@ -366,11 +366,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V10.0.3</h3>
+            <h3>Estado de V10.0.4</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Versión</span><strong>10.0.3</strong></div>
+            <div class="setting-row"><span>Versión</span><strong>10.0.4</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -510,14 +510,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V10.0.3. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V10.0.3</button>
+            <p>Restablece HomeTasks a los datos iniciales de V10.0.4. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V10.0.4</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">10.0.3</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">10.0.4</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -653,7 +653,8 @@
         </label>
       </div>
 
-      <div class="dialog-actions">
+      <div class="dialog-actions task-dialog-actions">
+        <button id="deleteTaskDialogButton" class="secondary-button danger-button dialog-delete-button" type="button" hidden>Eliminar tarea</button>
         <button id="cancelDialogButton" class="secondary-button" type="button">Cancelar</button>
         <button id="saveTaskButton" class="primary-button" type="submit">Guardar tarea</button>
       </div>

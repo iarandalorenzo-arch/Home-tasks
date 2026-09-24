@@ -1118,3 +1118,43 @@ html.tablet-ui .calendar-day-header span { font-size: 9px; }
   html.tablet-ui .card { transition: none !important; }
   html.tablet-ui .floor-plan-realistic { box-shadow: inset 0 0 0 1px rgba(108,130,154,.18); }
 }
+
+
+/* V10.0.4 - actividad por periodos naturales, mapa diario y tareas agrupadas por fecha */
+.map-count-legend { margin-left:auto; color:var(--muted); font-size:10px; font-weight:750; }
+.floor-room-card.room-card-ok .room-card-bg { fill: rgba(37,103,80,.96); }
+.floor-room-card.room-card-today-overdue .room-card-bg { fill: rgba(205,119,22,.97); }
+.floor-room-card.room-card-overdue .room-card-bg { fill: rgba(174,55,62,.98); }
+.floor-room-card.room-card-today-overdue .room-card-count-bg,
+.floor-room-card.room-card-overdue .room-card-count-bg,
+.floor-room-card.room-card-ok .room-card-count-bg { fill: rgba(255,255,255,.20); }
+.room-card-total-bg { fill: rgba(20,29,39,.94); stroke:rgba(255,255,255,.72); stroke-width:1.2; pointer-events:none; }
+.room-card-total { fill:#fff; font-size:10px; font-weight:900; pointer-events:none; }
+
+.task-list { gap:16px; }
+.task-day-group { display:grid; gap:8px; }
+.task-day-items { display:grid; gap:8px; }
+.task-day-heading {
+  display:flex; align-items:flex-end; justify-content:space-between; gap:12px;
+  padding:4px 4px 6px; border-bottom:1px solid var(--border);
+}
+.task-day-heading h3 { margin:1px 0 0; font-size:16px; line-height:1.2; }
+.task-day-kicker { color:var(--muted); font-size:9px; font-weight:900; letter-spacing:.055em; text-transform:uppercase; }
+.task-day-count { flex:0 0 auto; padding:5px 9px; border-radius:999px; background:var(--surface-2); color:var(--muted); font-size:10px; font-weight:850; }
+.task-day-group.today-day .task-day-heading { border-bottom-color:color-mix(in srgb,var(--accent) 45%,var(--border)); }
+.task-day-group.today-day .task-day-kicker { color:var(--accent); }
+.task-day-group.overdue-day .task-day-heading { border-bottom-color:color-mix(in srgb,var(--danger) 42%,var(--border)); }
+.task-day-group.overdue-day .task-day-kicker { color:var(--danger); }
+.task-day-group.undated .task-day-heading { border-bottom-style:dashed; }
+
+.task-dialog-actions { align-items:center; }
+.task-dialog-actions .dialog-delete-button { margin-right:auto; color:var(--danger); border-color:color-mix(in srgb,var(--danger) 35%,var(--border)); background:var(--danger-soft); }
+.task-dialog-actions .dialog-delete-button:hover { background:color-mix(in srgb,var(--danger) 18%,var(--surface)); }
+
+@media (max-width:520px) {
+  .map-count-legend { width:100%; margin-left:0; }
+  .task-day-heading { align-items:flex-start; }
+  .task-day-heading h3 { font-size:14px; }
+  .task-dialog-actions { display:grid; grid-template-columns:1fr 1fr; }
+  .task-dialog-actions .dialog-delete-button { grid-column:1/-1; width:100%; margin-right:0; }
+}
