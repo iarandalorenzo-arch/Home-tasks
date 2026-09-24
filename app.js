@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '10.0.4';
+const APP_VERSION = '10.0.5';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -101,6 +101,18 @@ function normalizeWorkSchedule(schedule){const base=defaultWorkSchedule();if(!sc
 function timeToMinutes(value){if(!/^\d{2}:\d{2}$/.test(String(value||'')))return null;const [h,m]=String(value).split(':').map(Number);return Number.isFinite(h)&&Number.isFinite(m)?h*60+m:null;}
 function minutesToTime(total){const n=Math.max(0,Math.min(1440,Number(total)||0));return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;}
 function normalizedDuration(value){const n=Number(value);return Number.isFinite(n)?Math.max(5,Math.min(480,Math.round(n/5)*5)):DEFAULT_TASK_DURATION;}
+function taskDurationInputState(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return { ok: false, empty: true, reason: 'Introduce una duración en minutos.' };
+  const valueNumber = Number(raw);
+  if (!Number.isFinite(valueNumber) || valueNumber < 5 || valueNumber > 480) {
+    return { ok: false, empty: false, reason: 'La duración debe estar entre 5 y 480 minutos.' };
+  }
+  if (valueNumber % 5 !== 0) {
+    return { ok: false, empty: false, reason: 'La duración debe ser múltiplo de 5 minutos.' };
+  }
+  return { ok: true, value: valueNumber };
+}
 function intervalsOverlap(aStart,aEnd,bStart,bEnd){return aStart<bEnd&&bStart<aEnd;}
 function workBlockForDate(user,dateISO){if(!user||!dateISO)return null;const date=new Date(`${dateISO}T12:00:00`);const item=normalizeWorkSchedule(user.workSchedule)[WEEKDAY_KEYS[date.getDay()]];if(!item?.active)return null;const start=timeToMinutes(item.start),end=timeToMinutes(item.end);return start!==null&&end!==null&&end>start?{...item,start,end}:null;}
 function slotConflicts(assigneeId,dateISO,startMinute,durationMinutes,excludeTaskId=null){if(!assigneeId||!dateISO||startMinute===null)return{ok:true};const duration=normalizedDuration(durationMinutes),endMinute=startMinute+duration;if(startMinute<PLAN_START_MINUTES||endMinute>PLAN_END_MINUTES)return{ok:false,reason:'La tarea debe quedar entre las 06:00 y las 24:00.'};const user=userById(assigneeId),work=workBlockForDate(user,dateISO);if(work&&intervalsOverlap(startMinute,endMinute,work.start,work.end))return{ok:false,reason:`${user?.name||'La persona'} trabaja de ${minutesToTime(work.start)} a ${minutesToTime(work.end)}.`};const conflict=state.tasks.find(task=>task.id!==excludeTaskId&&!task.completed&&task.assigneeId===assigneeId&&task.dueDate===dateISO&&task.dueTime&&intervalsOverlap(startMinute,endMinute,timeToMinutes(task.dueTime),timeToMinutes(task.dueTime)+normalizedDuration(task.durationMinutes)));return conflict?{ok:false,reason:`Coincide con “${conflict.title}” (${conflict.dueTime}–${minutesToTime(timeToMinutes(conflict.dueTime)+normalizedDuration(conflict.durationMinutes))}).`}:{ok:true};}
@@ -181,6 +193,7 @@ const defaultTemplates = [
 const recurrenceLabels = {
   none: 'Sin repetición',
   daily: 'Diaria',
+  weekdays: 'Entre semana',
   weekly: 'Semanal',
   monthly: 'Mensual',
   custom: 'Personalizada',
@@ -237,6 +250,8 @@ function nextRecurrenceDate(task) {
   const advance = () => {
     if (type === 'monthly') {
       date = addMonthsClamped(date, 1);
+    } else if (type === 'weekdays') {
+      do { date.setDate(date.getDate() + 1); } while (date.getDay() === 0 || date.getDay() === 6);
     } else {
       const days = type === 'daily' ? 1 : type === 'weekly' ? 7 : Math.max(2, Number(task.recurrenceDays) || 2);
       date.setDate(date.getDate() + days);
@@ -1587,9 +1602,188 @@ function formatWeekLabel(start, end) {
   return `${start.getDate()} ${monthName(start)} – ${end.getDate()} ${monthName(end)} ${end.getFullYear()}`;
 }
 
-function scheduleBlockStyle(startMinute,durationMinute,{normalize=true}={}){const total=PLAN_END_MINUTES-PLAN_START_MINUTES,start=Number(startMinute),duration=normalize?normalizedDuration(durationMinute):Math.max(0,Number(durationMinute)||0);if(!Number.isFinite(start)||duration<=0)return'display:none';const end=start+duration,visibleStart=Math.max(PLAN_START_MINUTES,start),visibleEnd=Math.min(PLAN_END_MINUTES,end);if(visibleEnd<=visibleStart)return'display:none';const top=(visibleStart-PLAN_START_MINUTES)/total*100,height=Math.max(0.45,(visibleEnd-visibleStart)/total*100);return`top:${top.toFixed(4)}%;height:${height.toFixed(4)}%`;}
-function planCalendarTaskMarkup(task,showPerson=false){const start=timeToMinutes(task.dueTime);if(start===null)return'';const duration=normalizedDuration(task.durationMinutes),room=roomById(task.roomId)?.name||'Sin ubicación',person=userName(task.assigneeId,task.assigneeName),sizeClass=duration<=15?' micro':duration<=30?' compact':'';const meta=duration<=30?`${task.dueTime} · ${room}`:`${task.dueTime}–${minutesToTime(start+duration)} · ${room}`;return`<button class="calendar-task${sizeClass} ${task.priority==='high'?'high':''}" style="${scheduleBlockStyle(start,duration)}" type="button" data-task-id="${task.id}" title="${escapeHTML(task.title)} · ${task.dueTime}–${minutesToTime(start+duration)} · ${escapeHTML(room)}"><strong>${escapeHTML(task.title)}</strong><span>${escapeHTML(meta)}</span>${showPerson?`<small>${escapeHTML(person)}</small>`:''}</button>`;}
-function renderPlan(){if(!els.weeklyPlanner)return;const start=weekStartForOffset(state.planWeekOffset),end=addDaysToDate(start,6),startISO=localISO(start),endISO=localISO(end);els.planWeekLabel.textContent=formatWeekLabel(start,end);const selected=els.planAssigneeFilter.value,selectedUser=selected&&selected!=='all'&&selected!=='unassigned'?userById(selected):null,dayNames=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'],days=Array.from({length:7},(_,i)=>addDaysToDate(start,i));const hourLabels=Array.from({length:19},(_,i)=>6+i).map(hour=>`<span style="top:${((hour*60-PLAN_START_MINUTES)/(PLAN_END_MINUTES-PLAN_START_MINUTES)*100).toFixed(4)}%">${String(hour).padStart(2,'0')}:00</span>`).join('');const columns=days.map((date,index)=>{const iso=localISO(date),isToday=iso===todayISO(),tasks=state.tasks.filter(task=>!task.completed&&task.dueDate===iso&&task.dueTime&&taskMatchesPlanAssignee(task));let work='';if(selectedUser){const block=workBlockForDate(selectedUser,iso);if(block)work=`<div class="calendar-work" style="${scheduleBlockStyle(block.start,block.end-block.start,{normalize:false})}" title="${escapeHTML(selectedUser.name)} · Trabajo ${minutesToTime(block.start)}–${minutesToTime(block.end)}"><strong>Trabajo</strong><span>${minutesToTime(block.start)}–${minutesToTime(block.end)}</span></div>`;}else if(selected==='all'&&state.users.length){const laneCount=Math.min(state.users.length,6);work=state.users.slice(0,laneCount).map((user,lane)=>{const block=workBlockForDate(user,iso);if(!block)return'';const gap=1.2,laneWidth=(100-gap*(laneCount+1))/laneCount,left=gap+lane*(laneWidth+gap);return`<div class="calendar-work calendar-work-lane" style="${scheduleBlockStyle(block.start,block.end-block.start,{normalize:false})};left:${left.toFixed(2)}%;right:auto;width:${laneWidth.toFixed(2)}%" title="${escapeHTML(user.name)} · Trabajo ${minutesToTime(block.start)}–${minutesToTime(block.end)}"><strong>${escapeHTML(user.name)}</strong><span>${minutesToTime(block.start)}–${minutesToTime(block.end)}</span></div>`;}).join('');}return`<div class="calendar-day-column ${isToday?'today':''}" data-date="${iso}"><div class="calendar-day-header"><span>${dayNames[index]}</span><strong>${date.getDate()}</strong><button class="plan-add-day" type="button" title="Nueva tarea">+</button></div><div class="calendar-day-track">${work}${tasks.map(task=>planCalendarTaskMarkup(task,!selectedUser)).join('')}</div></div>`;}).join('');els.weeklyPlanner.innerHTML=`<div class="schedule-calendar-shell"><div class="calendar-time-axis"><div class="calendar-axis-head"></div><div class="calendar-time-track">${hourLabels}</div></div><div class="calendar-days-grid">${columns}</div></div>`;els.weeklyPlanner.querySelectorAll('.calendar-task').forEach(button=>button.addEventListener('click',()=>openTaskDialog(button.dataset.taskId)));els.weeklyPlanner.querySelectorAll('.plan-add-day').forEach(button=>button.addEventListener('click',()=>{const date=button.closest('.calendar-day-column').dataset.date;openTaskDialog(null,date,selectedUser?.id||null);}));const backlog=state.tasks.filter(task=>!task.completed&&taskMatchesPlanAssignee(task)&&(!task.dueDate||isOverdue(task)||(task.assigneeId&&!task.dueTime)));if(!backlog.length)els.planBacklog.innerHTML='<div class="planner-empty">No hay tareas pendientes de programar.</div>';else{els.planBacklog.innerHTML=backlog.map(task=>{const room=roomById(task.roomId)?.name||'Sin ubicación',reason=!task.dueDate?'Sin fecha':(task.assigneeId&&!task.dueTime?'Sin hora':`Vencida · ${formatDate(task.dueDate)}`);return`<button class="backlog-row" type="button" data-task-id="${task.id}"><span><strong>${escapeHTML(task.title)}</strong><small>${escapeHTML(room)} · ${escapeHTML(durationText(task.durationMinutes))}</small></span><b>${escapeHTML(reason)}</b></button>`;}).join('');els.planBacklog.querySelectorAll('.backlog-row').forEach(button=>button.addEventListener('click',()=>openTaskDialog(button.dataset.taskId)));}const thirtyDaysAgo=Date.now()-30*86400000,workloadRows=state.users.map(user=>({id:user.id,name:user.name,pending:state.tasks.filter(task=>!task.completed&&task.assigneeId===user.id&&isDomesticRoomId(task.roomId)).length,week:state.tasks.filter(task=>!task.completed&&task.assigneeId===user.id&&isDomesticRoomId(task.roomId)&&task.dueDate>=startISO&&task.dueDate<=endISO).length,done:state.history.filter(item=>item.assigneeId===user.id&&isDomesticRoomId(item.roomId)&&item.completedAt>=thirtyDaysAgo).length})),unassigned=state.tasks.filter(task=>!task.completed&&!task.assigneeId&&isDomesticRoomId(task.roomId)).length;if(!workloadRows.length&&!unassigned)els.workloadSummary.innerHTML='<div class="planner-empty">Añade personas para ver el reparto.</div>';else{const rows=workloadRows.map(item=>`<button class="workload-row" type="button" data-user-id="${item.id}"><span class="workload-name"><i>${escapeHTML(item.name.charAt(0).toUpperCase())}</i>${escapeHTML(item.name)}</span><span><b>${item.week}</b><small>esta semana</small></span><span><b>${item.pending}</b><small>pendientes</small></span><span><b>${item.done}</b><small>hechas 30 d</small></span></button>`).join(''),unassignedRow=unassigned?`<button class="workload-row unassigned" type="button" data-user-id="unassigned"><span class="workload-name"><i>?</i>Sin asignar</span><span><b>—</b><small>esta semana</small></span><span><b>${unassigned}</b><small>pendientes</small></span><span><b>—</b><small>hechas 30 d</small></span></button>`:'';els.workloadSummary.innerHTML=rows+unassignedRow;els.workloadSummary.querySelectorAll('.workload-row').forEach(row=>row.addEventListener('click',()=>{els.assigneeFilter.value=row.dataset.userId;els.statusFilter.value='pending';switchView('tasks');renderTasks();}));}}
+function scheduleBlockStyle(startMinute, durationMinute, { normalize = true } = {}) {
+  const total = PLAN_END_MINUTES - PLAN_START_MINUTES;
+  const start = Number(startMinute);
+  const duration = normalize ? normalizedDuration(durationMinute) : Math.max(0, Number(durationMinute) || 0);
+  if (!Number.isFinite(start) || duration <= 0) return 'display:none';
+  const end = start + duration;
+  const visibleStart = Math.max(PLAN_START_MINUTES, start);
+  const visibleEnd = Math.min(PLAN_END_MINUTES, end);
+  if (visibleEnd <= visibleStart) return 'display:none';
+  const top = (visibleStart - PLAN_START_MINUTES) / total * 100;
+  const height = Math.max(0.45, (visibleEnd - visibleStart) / total * 100);
+  return `top:${top.toFixed(4)}%;height:${height.toFixed(4)}%`;
+}
+
+function calendarTaskInterval(task) {
+  const start = timeToMinutes(task.dueTime);
+  if (start === null) return null;
+  const duration = normalizedDuration(task.durationMinutes);
+  return { start, end: start + duration, duration };
+}
+
+function layoutPlanTasks(tasks) {
+  const ordered = [...tasks].sort((a, b) =>
+    (Number(a.createdAt || 0) - Number(b.createdAt || 0)) ||
+    String(a.dueTime || '').localeCompare(String(b.dueTime || '')) ||
+    String(a.id || '').localeCompare(String(b.id || ''))
+  );
+  const primary = [];
+  const collapsed = [];
+
+  for (const task of ordered) {
+    const interval = calendarTaskInterval(task);
+    if (!interval) continue;
+    const overlapsPrimary = primary.some(item => {
+      const other = calendarTaskInterval(item);
+      return other && intervalsOverlap(interval.start, interval.end, other.start, other.end);
+    });
+    if (overlapsPrimary) collapsed.push({ task, interval, slot: 0 });
+    else primary.push(task);
+  }
+
+  // Las tareas solapadas se colocan en columnas estrechas (+) sin taparse entre sí.
+  const slotEnds = [];
+  collapsed.sort((a, b) => a.interval.start - b.interval.start || Number(a.task.createdAt || 0) - Number(b.task.createdAt || 0));
+  for (const item of collapsed) {
+    let slot = 0;
+    while (slotEnds[slot] !== undefined && slotEnds[slot] > item.interval.start) slot += 1;
+    item.slot = slot;
+    slotEnds[slot] = item.interval.end;
+  }
+
+  const primaryReserve = new Map();
+  for (const task of primary) {
+    const interval = calendarTaskInterval(task);
+    const overlapping = collapsed.filter(item => intervalsOverlap(interval.start, interval.end, item.interval.start, item.interval.end));
+    primaryReserve.set(task.id, overlapping.length ? Math.max(...overlapping.map(item => item.slot)) + 1 : 0);
+  }
+  return { primary, collapsed, primaryReserve };
+}
+
+function planCalendarTaskMarkup(task, showPerson = false, { collapsed = false, slot = 0, reserve = 0 } = {}) {
+  const interval = calendarTaskInterval(task);
+  if (!interval) return '';
+  const { start, duration } = interval;
+  const room = roomById(task.roomId)?.name || 'Sin ubicación';
+  const person = userName(task.assigneeId, task.assigneeName);
+  const sizeClass = duration <= 15 ? ' micro' : duration <= 30 ? ' compact' : '';
+  const meta = duration <= 30 ? `${task.dueTime} · ${room}` : `${task.dueTime}–${minutesToTime(start + duration)} · ${room}`;
+  const title = `${task.title} · ${task.dueTime}–${minutesToTime(start + duration)} · ${room}`;
+
+  if (collapsed) {
+    const right = 5 + slot * 26;
+    return `<button class="calendar-overlap-task${task.priority === 'high' ? ' high' : ''}" style="${scheduleBlockStyle(start, duration)};right:${right}px" type="button" data-task-id="${task.id}" aria-expanded="false" title="${escapeHTML(title)}">
+      <span class="calendar-overlap-plus">+</span>
+      <span class="calendar-overlap-content"><strong>${escapeHTML(task.title)}</strong><span>${escapeHTML(meta)}</span>${showPerson ? `<small>${escapeHTML(person)}</small>` : ''}<em>Pulsa de nuevo para editar</em></span>
+    </button>`;
+  }
+
+  const reservedRight = reserve ? 9 + reserve * 26 : 5;
+  return `<button class="calendar-task${sizeClass} ${task.priority === 'high' ? 'high' : ''}${reserve ? ' has-overlap' : ''}" style="${scheduleBlockStyle(start, duration)};right:${reservedRight}px" type="button" data-task-id="${task.id}" title="${escapeHTML(title)}"><strong>${escapeHTML(task.title)}</strong><span>${escapeHTML(meta)}</span>${showPerson ? `<small>${escapeHTML(person)}</small>` : ''}</button>`;
+}
+
+function renderPlan() {
+  if (!els.weeklyPlanner) return;
+  const start = weekStartForOffset(state.planWeekOffset);
+  const end = addDaysToDate(start, 6);
+  const startISO = localISO(start);
+  const endISO = localISO(end);
+  els.planWeekLabel.textContent = formatWeekLabel(start, end);
+  const selected = els.planAssigneeFilter.value;
+  const selectedUser = selected && selected !== 'all' && selected !== 'unassigned' ? userById(selected) : null;
+  const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  const days = Array.from({ length: 7 }, (_, i) => addDaysToDate(start, i));
+  const hourLabels = Array.from({ length: 19 }, (_, i) => 6 + i).map(hour =>
+    `<span style="top:${((hour * 60 - PLAN_START_MINUTES) / (PLAN_END_MINUTES - PLAN_START_MINUTES) * 100).toFixed(4)}%">${String(hour).padStart(2, '0')}:00</span>`
+  ).join('');
+
+  const columns = days.map((date, index) => {
+    const iso = localISO(date);
+    const isToday = iso === todayISO();
+    const tasks = state.tasks.filter(task => !task.completed && task.dueDate === iso && task.dueTime && taskMatchesPlanAssignee(task));
+    const layout = layoutPlanTasks(tasks);
+    let work = '';
+
+    if (selectedUser) {
+      const block = workBlockForDate(selectedUser, iso);
+      if (block) work = `<div class="calendar-work" style="${scheduleBlockStyle(block.start, block.end - block.start, { normalize: false })}" title="${escapeHTML(selectedUser.name)} · Trabajo ${minutesToTime(block.start)}–${minutesToTime(block.end)}"><strong>Trabajo</strong><span>${minutesToTime(block.start)}–${minutesToTime(block.end)}</span></div>`;
+    } else if (selected === 'all' && state.users.length) {
+      const laneCount = Math.min(state.users.length, 6);
+      work = state.users.slice(0, laneCount).map((user, lane) => {
+        const block = workBlockForDate(user, iso);
+        if (!block) return '';
+        const gap = 1.2;
+        const laneWidth = (100 - gap * (laneCount + 1)) / laneCount;
+        const left = gap + lane * (laneWidth + gap);
+        return `<div class="calendar-work calendar-work-lane" style="${scheduleBlockStyle(block.start, block.end - block.start, { normalize: false })};left:${left.toFixed(2)}%;right:auto;width:${laneWidth.toFixed(2)}%" title="${escapeHTML(user.name)} · Trabajo ${minutesToTime(block.start)}–${minutesToTime(block.end)}"><strong>${escapeHTML(user.name)}</strong><span>${minutesToTime(block.start)}–${minutesToTime(block.end)}</span></div>`;
+      }).join('');
+    }
+
+    const taskMarkup = [
+      ...layout.primary.map(task => planCalendarTaskMarkup(task, !selectedUser, { reserve: layout.primaryReserve.get(task.id) || 0 })),
+      ...layout.collapsed.map(item => planCalendarTaskMarkup(item.task, !selectedUser, { collapsed: true, slot: item.slot }))
+    ].join('');
+
+    return `<div class="calendar-day-column ${isToday ? 'today' : ''}" data-date="${iso}"><div class="calendar-day-header"><span>${dayNames[index]}</span><strong>${date.getDate()}</strong><button class="plan-add-day" type="button" title="Nueva tarea">+</button></div><div class="calendar-day-track">${work}${taskMarkup}</div></div>`;
+  }).join('');
+
+  els.weeklyPlanner.innerHTML = `<div class="schedule-calendar-shell"><div class="calendar-time-axis"><div class="calendar-axis-head"></div><div class="calendar-time-track">${hourLabels}</div></div><div class="calendar-days-grid">${columns}</div></div>`;
+
+  els.weeklyPlanner.querySelectorAll('.calendar-task').forEach(button => button.addEventListener('click', () => openTaskDialog(button.dataset.taskId)));
+  els.weeklyPlanner.querySelectorAll('.calendar-overlap-task').forEach(button => button.addEventListener('click', event => {
+    event.stopPropagation();
+    const wasExpanded = button.classList.contains('expanded');
+    els.weeklyPlanner.querySelectorAll('.calendar-overlap-task.expanded').forEach(other => {
+      if (other !== button) { other.classList.remove('expanded'); other.setAttribute('aria-expanded', 'false'); }
+    });
+    if (wasExpanded) {
+      openTaskDialog(button.dataset.taskId);
+      return;
+    }
+    button.classList.add('expanded');
+    button.setAttribute('aria-expanded', 'true');
+  }));
+
+  els.weeklyPlanner.querySelectorAll('.plan-add-day').forEach(button => button.addEventListener('click', () => {
+    const date = button.closest('.calendar-day-column').dataset.date;
+    openTaskDialog(null, date, selectedUser?.id || null);
+  }));
+
+  const backlog = state.tasks.filter(task => !task.completed && taskMatchesPlanAssignee(task) && (!task.dueDate || isOverdue(task) || (task.assigneeId && !task.dueTime)));
+  if (!backlog.length) els.planBacklog.innerHTML = '<div class="planner-empty">No hay tareas pendientes de programar.</div>';
+  else {
+    els.planBacklog.innerHTML = backlog.map(task => {
+      const room = roomById(task.roomId)?.name || 'Sin ubicación';
+      const reason = !task.dueDate ? 'Sin fecha' : (task.assigneeId && !task.dueTime ? 'Sin hora' : `Vencida · ${formatDate(task.dueDate)}`);
+      return `<button class="backlog-row" type="button" data-task-id="${task.id}"><span><strong>${escapeHTML(task.title)}</strong><small>${escapeHTML(room)} · ${escapeHTML(durationText(task.durationMinutes))}</small></span><b>${escapeHTML(reason)}</b></button>`;
+    }).join('');
+    els.planBacklog.querySelectorAll('.backlog-row').forEach(button => button.addEventListener('click', () => openTaskDialog(button.dataset.taskId)));
+  }
+
+  const thirtyDaysAgo = Date.now() - 30 * 86400000;
+  const workloadRows = state.users.map(user => ({
+    id: user.id,
+    name: user.name,
+    pending: state.tasks.filter(task => !task.completed && task.assigneeId === user.id && isDomesticRoomId(task.roomId)).length,
+    week: state.tasks.filter(task => !task.completed && task.assigneeId === user.id && isDomesticRoomId(task.roomId) && task.dueDate >= startISO && task.dueDate <= endISO).length,
+    done: state.history.filter(item => item.assigneeId === user.id && isDomesticRoomId(item.roomId) && item.completedAt >= thirtyDaysAgo).length
+  }));
+  const unassigned = state.tasks.filter(task => !task.completed && !task.assigneeId && isDomesticRoomId(task.roomId)).length;
+  if (!workloadRows.length && !unassigned) els.workloadSummary.innerHTML = '<div class="planner-empty">Añade personas para ver el reparto.</div>';
+  else {
+    const rows = workloadRows.map(item => `<button class="workload-row" type="button" data-user-id="${item.id}"><span class="workload-name"><i>${escapeHTML(item.name.charAt(0).toUpperCase())}</i>${escapeHTML(item.name)}</span><span><b>${item.week}</b><small>esta semana</small></span><span><b>${item.pending}</b><small>pendientes</small></span><span><b>${item.done}</b><small>hechas 30 d</small></span></button>`).join('');
+    const unassignedRow = unassigned ? `<button class="workload-row unassigned" type="button" data-user-id="unassigned"><span class="workload-name"><i>?</i>Sin asignar</span><span><b>—</b><small>esta semana</small></span><span><b>${unassigned}</b><small>pendientes</small></span><span><b>—</b><small>hechas 30 d</small></span></button>` : '';
+    els.workloadSummary.innerHTML = rows + unassignedRow;
+    els.workloadSummary.querySelectorAll('.workload-row').forEach(row => row.addEventListener('click', () => {
+      els.assigneeFilter.value = row.dataset.userId;
+      els.statusFilter.value = 'pending';
+      switchView('tasks');
+      renderTasks();
+    }));
+  }
+}
 
 function renderSettings() {
   const houseName = settingValue('houseName', 'Mi casa');
@@ -1672,8 +1866,62 @@ function openTaskDialog(taskId = null, presetDate = null, presetAssigneeId = nul
   setTimeout(() => els.taskTitle.focus(), 50);
 }
 
-function validateTaskScheduleForm(){if(!els.taskScheduleStatus)return{ok:true};const assigneeId=els.taskAssignee.value||null,date=els.taskDueDate.value||'',time=els.taskDueTime.value||'',duration=normalizedDuration(els.taskDurationMinutes.value);els.taskDurationMinutes.value=duration;if(!assigneeId){els.taskScheduleStatus.className='schedule-status neutral';els.taskScheduleStatus.textContent='Sin responsable: la tarea puede quedar pendiente de programar.';return{ok:true};}if(!date||!time){els.taskScheduleStatus.className='schedule-status warning';els.taskScheduleStatus.textContent='Una tarea asignada necesita fecha y hora.';return{ok:false,reason:'Una tarea asignada necesita fecha y hora.'};}const start=timeToMinutes(time),result=slotConflicts(assigneeId,date,start,duration,state.editingTaskId);els.taskScheduleStatus.className=`schedule-status ${result.ok?'ok':'warning'}`;els.taskScheduleStatus.textContent=result.ok?`Hueco libre · ${time}–${minutesToTime(start+duration)} · ${durationText(duration)}`:result.reason;return result;}
-function renderFreeSlotSuggestions(){const assigneeId=els.taskAssignee.value,duration=normalizedDuration(els.taskDurationMinutes.value);if(!assigneeId){showToast('Selecciona primero una persona');return;}const slots=findFreeSlots(assigneeId,els.taskDueDate.value||todayISO(),duration,{limit:8,maxDays:14,preferredMinute:timeToMinutes(els.taskDueTime.value),excludeTaskId:state.editingTaskId});els.freeSlotSuggestions.hidden=false;els.freeSlotSuggestions.innerHTML=slots.length?`<span class="free-slot-title">Primeros huecos disponibles</span>${slots.map(slot=>`<button class="free-slot-chip" type="button" data-date="${slot.date}" data-time="${slot.time}">${formatDate(slot.date)} · ${slot.time}</button>`).join('')}`:'<span class="schedule-status warning">No se han encontrado huecos en los próximos 14 días.</span>';els.freeSlotSuggestions.querySelectorAll('.free-slot-chip').forEach(button=>button.addEventListener('click',()=>{els.taskDueDate.value=button.dataset.date;els.taskDueTime.value=button.dataset.time;els.freeSlotSuggestions.hidden=true;validateTaskScheduleForm();updateReminderControlAvailability();}));}
+function validateTaskScheduleForm() {
+  if (!els.taskScheduleStatus) return { ok: true };
+  const durationState = taskDurationInputState(els.taskDurationMinutes.value);
+  if (!durationState.ok) {
+    els.taskScheduleStatus.className = 'schedule-status warning';
+    els.taskScheduleStatus.textContent = durationState.reason;
+    return { ok: false, reason: durationState.reason };
+  }
+
+  const assigneeId = els.taskAssignee.value || null;
+  const date = els.taskDueDate.value || '';
+  const time = els.taskDueTime.value || '';
+  const duration = durationState.value;
+
+  if (!assigneeId) {
+    els.taskScheduleStatus.className = 'schedule-status neutral';
+    els.taskScheduleStatus.textContent = 'Sin responsable: la tarea puede quedar pendiente de programar.';
+    return { ok: true, duration };
+  }
+  if (!date || !time) {
+    els.taskScheduleStatus.className = 'schedule-status warning';
+    els.taskScheduleStatus.textContent = 'Una tarea asignada necesita fecha y hora.';
+    return { ok: false, reason: 'Una tarea asignada necesita fecha y hora.' };
+  }
+  const start = timeToMinutes(time);
+  const result = slotConflicts(assigneeId, date, start, duration, state.editingTaskId);
+  els.taskScheduleStatus.className = `schedule-status ${result.ok ? 'ok' : 'warning'}`;
+  els.taskScheduleStatus.textContent = result.ok
+    ? `Hueco libre · ${time}–${minutesToTime(start + duration)} · ${durationText(duration)}`
+    : result.reason;
+  return { ...result, duration };
+}
+
+function renderFreeSlotSuggestions() {
+  const assigneeId = els.taskAssignee.value;
+  const durationState = taskDurationInputState(els.taskDurationMinutes.value);
+  if (!durationState.ok) { showToast(durationState.reason); return; }
+  if (!assigneeId) { showToast('Selecciona primero una persona'); return; }
+  const slots = findFreeSlots(assigneeId, els.taskDueDate.value || todayISO(), durationState.value, {
+    limit: 8,
+    maxDays: 14,
+    preferredMinute: timeToMinutes(els.taskDueTime.value),
+    excludeTaskId: state.editingTaskId
+  });
+  els.freeSlotSuggestions.hidden = false;
+  els.freeSlotSuggestions.innerHTML = slots.length
+    ? `<span class="free-slot-title">Primeros huecos disponibles</span>${slots.map(slot => `<button class="free-slot-chip" type="button" data-date="${slot.date}" data-time="${slot.time}">${formatDate(slot.date)} · ${slot.time}</button>`).join('')}`
+    : '<span class="schedule-status warning">No se han encontrado huecos en los próximos 14 días.</span>';
+  els.freeSlotSuggestions.querySelectorAll('.free-slot-chip').forEach(button => button.addEventListener('click', () => {
+    els.taskDueDate.value = button.dataset.date;
+    els.taskDueTime.value = button.dataset.time;
+    els.freeSlotSuggestions.hidden = true;
+    validateTaskScheduleForm();
+    updateReminderControlAvailability();
+  }));
+}
 
 async function saveTask(event) {
   event.preventDefault();
@@ -1681,7 +1929,7 @@ async function saveTask(event) {
   if (!title) return;
   const scheduleCheck = validateTaskScheduleForm();
   if (!scheduleCheck.ok) { showToast(scheduleCheck.reason || 'Revisa la planificación'); return; }
-  const durationMinutes = normalizedDuration(els.taskDurationMinutes.value);
+  const durationMinutes = scheduleCheck.duration;
 
   if (state.editingTaskId) {
     const existing = state.tasks.find(item => item.id === state.editingTaskId);
@@ -3385,6 +3633,7 @@ function setupEvents() {
   els.planPrevWeek.addEventListener('click', () => { state.planWeekOffset -= 1; renderPlan(); });
   els.planTodayWeek.addEventListener('click', () => { state.planWeekOffset = 0; renderPlan(); });
   els.planNextWeek.addEventListener('click', () => { state.planWeekOffset += 1; renderPlan(); });
+  document.addEventListener('pointerdown', event => { if (!event.target.closest('.calendar-overlap-task')) document.querySelectorAll('.calendar-overlap-task.expanded').forEach(button => { button.classList.remove('expanded'); button.setAttribute('aria-expanded', 'false'); }); });
 
   els.newTaskButton.addEventListener('click', () => openTaskDialog());
   els.todayNewTaskButton?.addEventListener('click', () => openTaskDialog(null, todayISO()));
@@ -3464,7 +3713,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.4 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.5 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3481,7 +3730,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V10.0.4 restablecida');
+    showToast('V10.0.5 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
