@@ -715,7 +715,7 @@ function renderFloorPlan() {
     return floorRoomCardMarkup(room, layout, stats);
   }).join('');
 
-  const crop = { x: 55, y: 20, width: 1280, height: 955 };
+  const crop = { x: 20, y: 30, width: 1328, height: 935 };
 
   els.floorPlan.innerHTML = `
     <svg viewBox="${crop.x} ${crop.y} ${crop.width} ${crop.height}" role="img" aria-label="Plano interactivo de la vivienda">
