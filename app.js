@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '10.0.9';
+const APP_VERSION = '10.0.11';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -715,7 +715,7 @@ function renderFloorPlan() {
     return floorRoomCardMarkup(room, layout, stats);
   }).join('');
 
-  const crop = { x: 20, y: 30, width: 1328, height: 935 };
+  const crop = { x: 55, y: 20, width: 1280, height: 955 };
 
   els.floorPlan.innerHTML = `
     <svg viewBox="${crop.x} ${crop.y} ${crop.width} ${crop.height}" role="img" aria-label="Plano interactivo de la vivienda">
@@ -3728,7 +3728,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.9 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.11 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3745,7 +3745,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V10.0.9 restablecida');
+    showToast('V10.0.11 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
