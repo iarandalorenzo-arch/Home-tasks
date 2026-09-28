@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '10.0.11';
+const APP_VERSION = '10.0.12';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -1128,7 +1128,7 @@ function renderTasks() {
 
 function currentStatsPeriodKey() {
   const value = els.statsPeriodFilter?.value || localStorage.getItem(LS_STATS_PERIOD) || 'month';
-  return ['today', 'week', 'month'].includes(value) ? value : 'month';
+  return ['today', 'week', 'lastWeek', 'month'].includes(value) ? value : 'month';
 }
 
 function statsPeriodRange(periodKey = currentStatsPeriodKey()) {
@@ -1138,8 +1138,9 @@ function statsPeriodRange(periodKey = currentStatsPeriodKey()) {
   if (periodKey === 'today') {
     start.setHours(0, 0, 0, 0);
     end.setHours(23, 59, 59, 999);
-  } else if (periodKey === 'week') {
+  } else if (periodKey === 'week' || periodKey === 'lastWeek') {
     start = mondayOfWeek(now);
+    if (periodKey === 'lastWeek') start = addDaysToDate(start, -7);
     start.setHours(0, 0, 0, 0);
     end = addDaysToDate(start, 6);
     end.setHours(23, 59, 59, 999);
@@ -1162,6 +1163,7 @@ function statsPeriodText() {
   const periodKey = currentStatsPeriodKey();
   if (periodKey === 'today') return 'Hoy';
   if (periodKey === 'week') return 'Semana en curso';
+  if (periodKey === 'lastWeek') return 'Semana pasada';
   return 'Mes en curso';
 }
 
@@ -1190,7 +1192,7 @@ function buildActivityBuckets(history, periodKey = currentStatsPeriodKey()) {
     return counts.map((count, index) => ({ count, label: `${String(index * bucketHours).padStart(2, '0')}h` }));
   }
 
-  if (periodKey === 'week') {
+  if (periodKey === 'week' || periodKey === 'lastWeek') {
     const counts = Array(7).fill(0);
     history.forEach(item => {
       const date = new Date(Number(item.completedAt || 0));
@@ -1215,6 +1217,21 @@ function buildActivityBuckets(history, periodKey = currentStatsPeriodKey()) {
   return counts.map((count, index) => ({ count, label: String(index + 1) }));
 }
 
+function historyDurationMinutes(item) {
+  const recorded = Number(item?.durationMinutes);
+  if (Number.isFinite(recorded) && recorded > 0) return normalizedDuration(recorded);
+  const sourceTask = state.tasks.find(task => task.id === item?.taskId);
+  if (sourceTask) return normalizedDuration(sourceTask.durationMinutes);
+  return DEFAULT_TASK_DURATION;
+}
+
+function activityMinutesText(minutes) {
+  const value = Math.max(0, Math.round(Number(minutes) || 0));
+  if (value < 60) return `${value} min`;
+  if (value % 60 === 0) return `${value / 60} h`;
+  return `${Math.floor(value / 60)} h ${value % 60} min`;
+}
+
 function renderActivityStats() {
   if (!els.statsCompleted) return;
   const history = historyForStatsPeriod();
@@ -1224,8 +1241,8 @@ function renderActivityStats() {
   const pendingTasks = state.tasks.filter(task => !task.completed && !isWaitingTask(task));
   const overdue = pendingTasks.filter(isOverdue).length;
 
-  // Las métricas generales incluyen todas las actividades. El bloque de reparto
-  // doméstico excluye expresamente la ubicación NA / Fuera de casa.
+  // Las métricas generales incluyen todas las actividades. Para el reparto por persona
+  // solo se usan completadas con responsable; las no asignadas quedan fuera del denominador.
   const domesticHistory = history.filter(item => isDomesticRoomId(item.roomId));
   const domesticPending = pendingTasks.filter(task => isDomesticRoomId(task.roomId));
   const domesticTotal = domesticHistory.length;
@@ -1236,27 +1253,27 @@ function renderActivityStats() {
   els.statsOverdue.textContent = overdue;
   els.statsPeriodLabel.textContent = statsPeriodText();
 
+  const assignedHistory = history.filter(item => item.assigneeId && state.users.some(user => user.id === item.assigneeId));
+  const assignedTaskTotal = assignedHistory.length;
+  const assignedMinuteTotal = assignedHistory.reduce((sum, item) => sum + historyDurationMinutes(item), 0);
   const personRows = state.users.map(user => {
-    const done = domesticHistory.filter(item => item.assigneeId === user.id).length;
-    const pending = domesticPending.filter(task => task.assigneeId === user.id).length;
-    const overdueCount = domesticPending.filter(task => task.assigneeId === user.id && isOverdue(task)).length;
-    return { id: user.id, name: user.name, done, pending, overdue: overdueCount };
+    const completedItems = assignedHistory.filter(item => item.assigneeId === user.id);
+    const done = completedItems.length;
+    const minutes = completedItems.reduce((sum, item) => sum + historyDurationMinutes(item), 0);
+    const taskShare = assignedTaskTotal ? Math.round(done * 100 / assignedTaskTotal) : 0;
+    const minuteShare = assignedMinuteTotal ? Math.round(minutes * 100 / assignedMinuteTotal) : 0;
+    return { id: user.id, name: user.name, done, minutes, taskShare, minuteShare };
   });
-  const unassignedDone = domesticHistory.filter(item => !item.assigneeId).length;
-  const unassignedPending = domesticPending.filter(task => !task.assigneeId).length;
-  const unassignedOverdue = domesticPending.filter(task => !task.assigneeId && isOverdue(task)).length;
-  if (unassignedDone || unassignedPending) personRows.push({ id: 'unassigned', name: 'Sin asignar', done: unassignedDone, pending: unassignedPending, overdue: unassignedOverdue });
 
   if (!personRows.length) {
-    els.statsPeople.innerHTML = '<div class="stats-empty">Añade personas para analizar el reparto doméstico.</div>';
+    els.statsPeople.innerHTML = '<div class="stats-empty">Añade personas para analizar el reparto de tareas completadas.</div>';
   } else {
     els.statsPeople.innerHTML = personRows.map(item => {
-      const share = domesticTotal ? Math.round(item.done * 100 / domesticTotal) : 0;
-      const initial = item.id === 'unassigned' ? '?' : (item.name.trim().charAt(0).toUpperCase() || '?');
-      return `<div class="stats-bar-row">
-        <div class="stats-bar-head"><span class="stats-entity"><i>${escapeHTML(initial)}</i><b>${escapeHTML(item.name)}</b></span><span><strong>${item.done}</strong> hechas · ${share}%</span></div>
-        <div class="stats-bar-track"><span style="width:${Math.max(0, Math.min(100, share))}%"></span></div>
-        <div class="stats-bar-foot"><span>${item.pending} pendientes</span><span class="${item.overdue ? 'danger-text' : ''}">${item.overdue} vencidas</span></div>
+      const initial = item.name.trim().charAt(0).toUpperCase() || '?';
+      return `<div class="stats-bar-row person-completion-stat">
+        <div class="stats-bar-head"><span class="stats-entity"><i>${escapeHTML(initial)}</i><b>${escapeHTML(item.name)}</b></span><span><strong>${item.done}</strong> tareas · ${escapeHTML(activityMinutesText(item.minutes))}</span></div>
+        <div class="stats-share-metric"><div class="stats-share-label"><span>Por tareas</span><strong>${item.taskShare}%</strong></div><div class="stats-bar-track"><span style="width:${Math.max(0, Math.min(100, item.taskShare))}%"></span></div></div>
+        <div class="stats-share-metric minutes"><div class="stats-share-label"><span>Por minutos</span><strong>${item.minuteShare}%</strong></div><div class="stats-bar-track"><span style="width:${Math.max(0, Math.min(100, item.minuteShare))}%"></span></div></div>
       </div>`;
     }).join('');
   }
@@ -1283,6 +1300,34 @@ function renderActivityStats() {
     </div>`;
   }).join('');
 }
+async function deleteHistoryItem(historyId) {
+  const item = state.history.find(entry => entry.id === historyId);
+  if (!item) return;
+  const label = item.title || 'esta actividad';
+  if (!confirm(`¿Eliminar “${label}” del histórico? Esta acción también se sincronizará con los demás dispositivos.`)) return;
+
+  const now = Date.now();
+  await markDeleted('history', item.id, now);
+  await remove('history', item.id);
+
+  let reopened = false;
+  const sourceTask = state.tasks.find(task => task.id === item.taskId);
+  if (sourceTask && !item.recurring && sourceTask.completed && Number(sourceTask.completedAt || 0) === Number(item.completedAt || 0)) {
+    await put('tasks', { ...sourceTask, completed: false, completedAt: null, modifiedAt: now });
+    const pendingChildren = state.tasks.filter(task => task.chainParentId === sourceTask.id && !task.completed);
+    for (const child of pendingChildren) {
+      await markDeleted('tasks', child.id, now);
+      await remove('tasks', child.id);
+    }
+    reopened = true;
+  }
+
+  await loadState();
+  renderAll();
+  touchCloudDirty();
+  showToast(reopened ? 'Actividad eliminada · tarea reabierta' : 'Actividad eliminada del histórico');
+}
+
 function renderHistory() {
   const history = getFilteredHistory();
   if (history.length === 0) {
@@ -1295,12 +1340,18 @@ function renderHistory() {
     const time = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date);
     const roomName = roomById(item.roomId)?.name || item.roomName || 'Sin ubicación';
     const person = userName(item.assigneeId, item.assigneeName);
-    return `<div class="history-row">
+    const minutes = historyDurationMinutes(item);
+    return `<div class="history-row" data-history-id="${item.id}">
       <div class="history-time">${time}</div>
-      <div><div class="history-title">${escapeHTML(item.title)}</div><div class="history-meta">${escapeHTML(roomName)}</div></div>
+      <div><div class="history-title">${escapeHTML(item.title)}</div><div class="history-meta">${escapeHTML(roomName)} · ${escapeHTML(activityMinutesText(minutes))}</div></div>
       <div class="history-user">${escapeHTML(person)}</div>
+      <button class="history-delete-button" type="button" title="Eliminar del histórico" aria-label="Eliminar ${escapeHTML(item.title)} del histórico">Eliminar</button>
     </div>`;
   }).join('');
+
+  els.historyList.querySelectorAll('.history-delete-button').forEach(button => {
+    button.addEventListener('click', () => deleteHistoryItem(button.closest('.history-row')?.dataset.historyId));
+  });
 }
 
 function workScheduleSummary(user){const schedule=normalizeWorkSchedule(user.workSchedule),active=WORKDAY_LABELS.filter(([key])=>schedule[key].active);if(!active.length)return'Sin horario laboral configurado';const groups=new Map();for(const [key,label] of active){const block=schedule[key],k=`${block.start}-${block.end}`;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(label.slice(0,3));}return[...groups.entries()].map(([hours,days])=>`${days.join(', ')} · ${hours}`).join(' · ');}
@@ -2050,6 +2101,7 @@ async function toggleTask(id) {
       id: makeId(), taskId: task.id, title: task.title, roomId: task.roomId,
       roomName: roomById(task.roomId)?.name || 'Sin ubicación',
       assigneeId: task.assigneeId || null, assigneeName: userName(task.assigneeId, task.assigneeName),
+      durationMinutes: normalizedDuration(task.durationMinutes),
       completedAt, recurring: true, modifiedAt: completedAt,
     });
     let nextTask={...task,completed:false,completedAt:null,lastCompletedAt:completedAt,dueDate:nextDueDate,modifiedAt:completedAt};if(nextTask.assigneeId){const slot=firstFreeSlotOnDate(nextTask.assigneeId,nextDueDate,nextTask.durationMinutes,nextTask.dueTime,nextTask.id);if(slot)nextTask.dueTime=slot.time;else{nextTask.suggestedAssigneeId=nextTask.assigneeId;nextTask.assigneeId=null;nextTask.assigneeName=undefined;nextTask.dueTime='';}}await put('tasks',nextTask);
@@ -2069,6 +2121,7 @@ async function toggleTask(id) {
       id: makeId(), taskId: task.id, title: task.title, roomId: task.roomId,
       roomName: roomById(task.roomId)?.name || 'Sin ubicación',
       assigneeId: task.assigneeId || null, assigneeName: userName(task.assigneeId, task.assigneeName),
+      durationMinutes: normalizedDuration(task.durationMinutes),
       completedAt: updated.completedAt, modifiedAt: updated.completedAt,
     });
     const chainedTask = await createChainedTask(task, updated.completedAt);
@@ -3728,7 +3781,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.11 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.12 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3745,7 +3798,7 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V10.0.11 restablecida');
+    showToast('V10.0.12 restablecida');
   });
 
   window.addEventListener('online', updateConnection);
@@ -3754,7 +3807,7 @@ function setupEvents() {
 
 async function init() {
   cacheElements();
-  if (els.statsPeriodFilter) { const savedPeriod = localStorage.getItem(LS_STATS_PERIOD); els.statsPeriodFilter.value = ['today','week','month'].includes(savedPeriod) ? savedPeriod : 'month'; }
+  if (els.statsPeriodFilter) { const savedPeriod = localStorage.getItem(LS_STATS_PERIOD); els.statsPeriodFilter.value = ['today','week','lastWeek','month'].includes(savedPeriod) ? savedPeriod : 'month'; }
   setupTheme();
   setupTabletMode();
   updateConnection();

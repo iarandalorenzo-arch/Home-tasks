@@ -1384,3 +1384,20 @@ html.tablet-ui .today-map-card .floor-plan-realistic svg {
   .today-map-card .floor-plan,
   .floor-plan-realistic { padding: 3px !important; }
 }
+
+
+/* V10.0.12 - reparto por tareas/minutos y edición del histórico */
+.person-completion-stat { display:grid; gap:7px; }
+.stats-share-metric { display:grid; gap:4px; }
+.stats-share-label { display:flex; align-items:center; justify-content:space-between; gap:10px; color:var(--muted); font-size:9px; font-weight:750; }
+.stats-share-label strong { color:var(--text); font-size:11px; }
+.stats-share-metric .stats-bar-track { margin-top:0; }
+.stats-share-metric.minutes .stats-bar-track > span { background:color-mix(in srgb,var(--success) 72%,var(--accent)); }
+.history-row { grid-template-columns:100px minmax(0,1fr) auto auto; }
+.history-delete-button { min-height:30px; padding:0 9px; border:1px solid color-mix(in srgb,var(--danger) 30%,var(--border)); border-radius:9px; background:var(--danger-soft); color:var(--danger); font:inherit; font-size:10px; font-weight:800; cursor:pointer; }
+.history-delete-button:hover { background:color-mix(in srgb,var(--danger) 18%,var(--surface)); }
+@media (max-width:700px) {
+  .history-row { grid-template-columns:68px minmax(0,1fr) auto; gap:8px; }
+  .history-user { grid-column:2; }
+  .history-delete-button { grid-column:3; grid-row:1 / span 2; align-self:center; padding:0 7px; font-size:9px; }
+}
