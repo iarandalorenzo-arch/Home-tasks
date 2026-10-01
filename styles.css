@@ -1597,3 +1597,47 @@ html.tablet-ui .meal-week-open small { font-size: 8px; }
   .copy-week-arrow { transform:rotate(90deg); justify-self:center; line-height:1; }
   .meal-type-actions { display:grid; grid-template-columns:auto auto 1fr 1fr; }
 }
+
+
+/* V11-C - ChatGPT nutricional contextual. */
+.nutrition-chat-dialog { width: min(820px, calc(100% - 22px)); max-height: min(88vh, 820px); padding: 0; overflow: hidden; }
+.nutrition-chat-dialog::backdrop { background: rgba(7,12,20,.56); backdrop-filter: blur(2px); }
+.nutrition-chat-shell { display: grid; grid-template-rows: auto auto auto minmax(210px,1fr) auto auto auto; gap: 10px; max-height: min(88vh, 820px); padding: 16px; }
+.nutrition-chat-header { margin: 0; }
+.nutrition-chat-context-label { margin: 3px 0 0; color: var(--muted); font-size: 10px; text-transform: capitalize; }
+.nutrition-chat-status-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nutrition-chat-status { display: inline-flex; align-items: center; min-height: 25px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 9px; font-weight: 850; }
+.nutrition-chat-status.ready { border-color: color-mix(in srgb,var(--success) 35%,var(--border)); background: color-mix(in srgb,var(--success) 10%,var(--surface)); color: var(--success); }
+.nutrition-chat-status.error { border-color: color-mix(in srgb,var(--danger) 35%,var(--border)); background: color-mix(in srgb,var(--danger) 8%,var(--surface)); color: var(--danger); }
+.nutrition-chat-status.checking { color: var(--accent); }
+.nutrition-chat-model { color: var(--muted); font-size: 9px; font-weight: 750; }
+.nutrition-chat-status-row #clearNutritionChat { margin-left: auto; }
+.nutrition-chat-setup { padding: 11px 12px; border: 1px solid color-mix(in srgb,var(--warning) 38%,var(--border)); border-radius: 13px; background: var(--warning-soft); }
+.nutrition-chat-setup[hidden] { display: none; }
+.nutrition-chat-setup strong { display: block; font-size: 11px; }
+.nutrition-chat-setup p { margin: 4px 0 9px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.nutrition-chat-messages { min-height: 210px; overflow-y: auto; overscroll-behavior: contain; display: grid; align-content: start; gap: 9px; padding: 12px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface-2); }
+.nutrition-chat-welcome { display: grid; gap: 5px; max-width: 88%; padding: 12px 13px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); }
+.nutrition-chat-welcome strong { font-size: 12px; }
+.nutrition-chat-welcome span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.nutrition-chat-message { display: grid; gap: 4px; max-width: 88%; padding: 10px 12px; border-radius: 14px; font-size: 11px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.nutrition-chat-message.user { justify-self: end; background: var(--accent); color: white; border-bottom-right-radius: 5px; }
+.nutrition-chat-message.assistant { justify-self: start; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-bottom-left-radius: 5px; }
+.nutrition-chat-message.pending { color: var(--muted); font-style: italic; }
+.nutrition-chat-message small { opacity: .72; font-size: 8px; }
+.nutrition-chat-suggestions { display: flex; gap: 6px; overflow-x: auto; padding: 1px 0 3px; scrollbar-width: thin; }
+.nutrition-chat-suggestions button { flex: 0 0 auto; min-height: 31px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 9px; font-weight: 800; }
+.nutrition-chat-suggestions button:hover { color: var(--accent); border-color: color-mix(in srgb,var(--accent) 35%,var(--border)); }
+.nutrition-chat-compose { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: end; }
+.nutrition-chat-compose textarea { width: 100%; min-height: 54px; max-height: 140px; resize: vertical; line-height: 1.4; }
+.nutrition-chat-compose .primary-button { min-height: 44px; }
+.nutrition-chat-note { margin: 0; color: var(--muted); font-size: 8.5px; line-height: 1.4; }
+.nutrition-chat-button small { background: color-mix(in srgb,var(--accent) 12%,var(--surface-2)); color: var(--accent); }
+
+@media (max-width: 700px) {
+  .nutrition-chat-dialog { width: calc(100% - 10px); max-height: 94vh; }
+  .nutrition-chat-shell { max-height: 94vh; padding: 12px; grid-template-rows: auto auto auto minmax(180px,1fr) auto auto auto; }
+  .nutrition-chat-message, .nutrition-chat-welcome { max-width: 94%; }
+  .nutrition-chat-compose { grid-template-columns: 1fr; }
+  .nutrition-chat-compose .primary-button { width: 100%; }
+}

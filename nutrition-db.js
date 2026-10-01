@@ -1,6 +1,6 @@
 const NUTRITION_DB_NAME = 'hometasks-nutrition-v11';
-const NUTRITION_DB_VERSION = 1;
-const NUTRITION_STORES = ['foods', 'targets', 'mealTypes', 'entries'];
+const NUTRITION_DB_VERSION = 2;
+const NUTRITION_STORES = ['foods', 'targets', 'mealTypes', 'entries', 'chatMessages'];
 
 function requestToPromise(request) {
   return new Promise((resolve, reject) => {

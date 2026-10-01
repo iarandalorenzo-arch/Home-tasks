@@ -7,9 +7,13 @@ import {
   resetNutritionDatabase,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '11-B';
+const NUTRITION_VERSION = '11-C';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
+const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
+const LS_SYNC_HOUSE_KEY = 'hometasks-appsscript-house-key';
+const CHAT_HISTORY_LIMIT = 10;
+const CHAT_LIBRARY_LIMIT = 80;
 const DEFAULT_MEAL_TYPES = [
   { id: 'breakfast', name: 'Desayuno', order: 10, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
   { id: 'lunch', name: 'Comida', order: 20, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
@@ -66,6 +70,10 @@ const state = {
   copySourceDate: '',
   copyWeekSourceStart: '',
   copyWeekDestinationStart: '',
+  chatMessages: [],
+  chatBusy: false,
+  chatBackendReady: false,
+  chatBackendModel: '',
 };
 
 const els = {};
@@ -82,7 +90,9 @@ function cacheElements() {
     'copyDayDialog','copyDayForm','copyDaySourceLabel','copyDayDestination','closeCopyDayDialog','cancelCopyDayDialog',
     'mealTypesDialog','mealTypeManagerList','newMealTypeButton','closeMealTypesDialog','closeMealTypesDialogFooter',
     'mealTypeNameDialog','mealTypeNameForm','mealTypeNameDialogTitle','mealTypeNameInput','closeMealTypeNameDialog','cancelMealTypeNameDialog',
-    'copyWeekDialog','copyWeekForm','copyWeekSourceLabel','copyWeekDestinationLabel','copyWeekWarning','closeCopyWeekDialog','cancelCopyWeekDialog'
+    'copyWeekDialog','copyWeekForm','copyWeekSourceLabel','copyWeekDestinationLabel','copyWeekWarning','closeCopyWeekDialog','cancelCopyWeekDialog',
+    'nutritionChatDialog','nutritionChatContextLabel','nutritionChatStatus','nutritionChatModel','nutritionChatSetup','nutritionChatSetupText','nutritionChatMessages',
+    'nutritionChatForm','nutritionChatInput','nutritionChatSend','closeNutritionChat','clearNutritionChat','nutritionChatSettingsButton'
   ].forEach(id => { els[id] = document.getElementById(id); });
 }
 
@@ -106,6 +116,7 @@ async function loadNutritionState({ refreshUsers = true } = {}) {
     nutritionGetAll('targets'),
     nutritionGetAll('mealTypes'),
     nutritionGetAll('entries'),
+    nutritionGetAll('chatMessages'),
   ];
   if (refreshUsers) jobs.unshift(getAll('users'));
   const values = await Promise.all(jobs);
@@ -115,6 +126,7 @@ async function loadNutritionState({ refreshUsers = true } = {}) {
   state.targets = values[offset++];
   state.mealTypes = values[offset++];
   state.entries = values[offset++];
+  state.chatMessages = values[offset++];
   state.users.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
   state.foods.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
   state.mealTypes.sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || String(a.name || '').localeCompare(String(b.name || ''), 'es'));
@@ -336,6 +348,7 @@ function setSelectedDate(value) {
   localStorage.setItem(LS_SELECTED_DATE, value);
   if (state.mode === 'week') renderWeek();
   else renderDay();
+  if (els.nutritionChatDialog?.open) { renderChatContextLabel(); renderChatMessages(); }
 }
 
 function openTargetsDialog() {
@@ -721,6 +734,245 @@ async function copyPreviousWeek(event) {
   showToast('Semana anterior copiada');
 }
 
+
+function chatBackendConfig() {
+  const endpoint = String(localStorage.getItem(LS_SYNC_ENDPOINT) || '').trim().replace(/\/$/, '');
+  const houseKey = String(localStorage.getItem(LS_SYNC_HOUSE_KEY) || '');
+  if (!endpoint || !houseKey) return { endpoint: '', houseKey: '' };
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol !== 'https:' || !/script\.google\.com$/i.test(url.hostname) || !/\/exec\/?$/i.test(url.pathname)) return { endpoint: '', houseKey: '' };
+  } catch (_) { return { endpoint: '', houseKey: '' }; }
+  return { endpoint, houseKey };
+}
+
+function chatJsonpRequest(action, params = {}, timeoutMs = 25000) {
+  const { endpoint, houseKey } = chatBackendConfig();
+  if (!endpoint || !houseKey) return Promise.reject(new Error('Configura primero Apps Script en Ajustes.'));
+  return new Promise((resolve, reject) => {
+    const callback = `__ht_ai_${Date.now()}_${Math.random().toString(16).slice(2)}`.replace(/[^A-Za-z0-9_$]/g, '_');
+    const url = new URL(endpoint);
+    url.searchParams.set('action', action);
+    url.searchParams.set('key', houseKey);
+    url.searchParams.set('callback', callback);
+    url.searchParams.set('clientVersion', NUTRITION_VERSION);
+    Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
+    url.searchParams.set('_', String(Date.now()));
+    const script = document.createElement('script');
+    script.referrerPolicy = 'no-referrer';
+    let timer = null;
+    const cleanup = () => {
+      clearTimeout(timer);
+      script.remove();
+      try { delete globalThis[callback]; } catch (_) { globalThis[callback] = undefined; }
+    };
+    globalThis[callback] = payload => { cleanup(); resolve(payload || {}); };
+    script.onerror = () => { cleanup(); reject(new Error('No se ha podido contactar con Apps Script.')); };
+    timer = setTimeout(() => { cleanup(); reject(new Error('Apps Script está tardando más de lo esperado.')); }, timeoutMs);
+    script.src = url.toString();
+    document.head.appendChild(script);
+  });
+}
+
+async function chatPost(payload, timeoutMs = 95000) {
+  const { endpoint, houseKey } = chatBackendConfig();
+  if (!endpoint || !houseKey) throw new Error('Configura primero Apps Script en Ajustes.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetch(endpoint, {
+      method: 'POST', mode: 'no-cors', cache: 'no-store', redirect: 'follow', credentials: 'omit',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify({ ...payload, key: houseKey, clientVersion: NUTRITION_VERSION }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('ChatGPT está tardando demasiado en responder.');
+    throw new Error('No se ha podido enviar la consulta a Apps Script.');
+  } finally { clearTimeout(timer); }
+}
+
+function setChatStatus(kind, text, model = '') {
+  if (!els.nutritionChatStatus) return;
+  els.nutritionChatStatus.className = `nutrition-chat-status ${kind}`;
+  els.nutritionChatStatus.textContent = text;
+  els.nutritionChatModel.textContent = model ? `Modelo: ${model}` : '';
+}
+
+function chatMessagesForPerson(personId = state.selectedPersonId) {
+  return state.chatMessages
+    .filter(item => item.personId === personId && (item.role === 'user' || item.role === 'assistant'))
+    .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+}
+
+function buildChatContext() {
+  const user = state.users.find(item => item.id === state.selectedPersonId);
+  const target = currentTarget();
+  const totals = totalsFor(state.selectedPersonId, state.selectedDate);
+  const meals = state.mealTypes.map(type => ({
+    name: type.name,
+    totals: totalsFor(state.selectedPersonId, state.selectedDate, type.id),
+    foods: entriesFor(state.selectedPersonId, state.selectedDate, type.id).map(entry => {
+      const food = foodForEntry(entry);
+      return { name: food?.name || 'Alimento eliminado', grams: safeNumber(entry.quantityGrams), values: nutritionForEntry(entry) };
+    }),
+  })).filter(meal => meal.foods.length);
+  const weekStart = mondayISO(state.selectedDate);
+  const week = Array.from({ length: 7 }, (_, index) => {
+    const date = shiftISO(weekStart, index);
+    return { date, totals: totalsFor(state.selectedPersonId, date), plannedFoods: entriesFor(state.selectedPersonId, date).length };
+  });
+  const library = state.foods.slice(0, CHAT_LIBRARY_LIMIT).map(food => ({
+    name: food.name, kcal: safeNumber(food.kcal), protein: safeNumber(food.protein), carbs: safeNumber(food.carbs), fat: safeNumber(food.fat), fiber: safeNumber(food.fiber), source: food.source || 'Manual',
+  }));
+  return {
+    person: { id: state.selectedPersonId, name: user?.name || 'Persona seleccionada' },
+    selectedDate: state.selectedDate,
+    targets: target ? { kcal: safeNumber(target.kcal), protein: safeNumber(target.protein), carbs: safeNumber(target.carbs), fat: safeNumber(target.fat), fiber: safeNumber(target.fiber) } : null,
+    dayTotals: totals,
+    meals,
+    weekStart,
+    week,
+    foodLibrary: library,
+    foodLibraryTruncated: state.foods.length > CHAT_LIBRARY_LIMIT,
+  };
+}
+
+function renderChatMessages() {
+  if (!els.nutritionChatMessages) return;
+  const messages = chatMessagesForPerson();
+  if (!messages.length) {
+    els.nutritionChatMessages.innerHTML = `<div class="nutrition-chat-welcome"><strong>ChatGPT puede leer el contexto de Comidas.</strong><span>Pregúntale por el menú del ${escapeHTML(formatDateLong(state.selectedDate))}, tus objetivos, la semana o los alimentos guardados. No modificará datos automáticamente.</span></div>`;
+  } else {
+    els.nutritionChatMessages.innerHTML = messages.map(message => `<div class="nutrition-chat-message ${message.role}"><div>${escapeHTML(message.text).replace(/\n/g, '<br>')}</div><small>${new Date(message.createdAt).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</small></div>`).join('');
+  }
+  if (state.chatBusy) els.nutritionChatMessages.insertAdjacentHTML('beforeend', '<div class="nutrition-chat-message assistant pending">ChatGPT está preparando la respuesta…</div>');
+  els.nutritionChatMessages.scrollTop = els.nutritionChatMessages.scrollHeight;
+  els.clearNutritionChat.disabled = !messages.length || state.chatBusy;
+}
+
+function renderChatContextLabel() {
+  const user = state.users.find(item => item.id === state.selectedPersonId);
+  if (els.nutritionChatContextLabel) els.nutritionChatContextLabel.textContent = `${user?.name || 'Sin persona'} · ${formatDateLong(state.selectedDate)}`;
+}
+
+async function refreshChatBackendStatus() {
+  const config = chatBackendConfig();
+  if (!navigator.onLine) {
+    state.chatBackendReady = false;
+    setChatStatus('error', 'Sin conexión');
+    els.nutritionChatSetup.hidden = false;
+    els.nutritionChatSetupText.textContent = 'El historial local está disponible, pero ChatGPT necesita conexión a Internet.';
+    return false;
+  }
+  if (!config.endpoint || !config.houseKey) {
+    state.chatBackendReady = false;
+    setChatStatus('error', 'Apps Script sin configurar');
+    els.nutritionChatSetup.hidden = false;
+    els.nutritionChatSetupText.textContent = 'Configura la URL /exec y la clave de la casa en Ajustes. V11-C usa ese mismo backend como proxy seguro.';
+    return false;
+  }
+  setChatStatus('checking', 'Comprobando ChatGPT…');
+  try {
+    const result = await chatJsonpRequest('nutrition_ai_status', {}, 18000);
+    state.chatBackendReady = Boolean(result.ok && result.configured);
+    state.chatBackendModel = result.model || '';
+    if (state.chatBackendReady) {
+      setChatStatus('ready', 'ChatGPT conectado', state.chatBackendModel);
+      els.nutritionChatSetup.hidden = true;
+      return true;
+    }
+    const message = result.error === 'unauthorized'
+      ? 'La clave de la casa no coincide con el Apps Script desplegado.'
+      : 'Añade OPENAI_API_KEY en Propiedades de secuencia de comandos del proyecto Apps Script y vuelve a desplegar V11-C.';
+    setChatStatus('error', 'ChatGPT sin configurar');
+    els.nutritionChatSetup.hidden = false;
+    els.nutritionChatSetupText.textContent = message;
+    return false;
+  } catch (error) {
+    state.chatBackendReady = false;
+    setChatStatus('error', 'Backend no disponible');
+    els.nutritionChatSetup.hidden = false;
+    els.nutritionChatSetupText.textContent = error?.message || 'No se ha podido comprobar el backend.';
+    return false;
+  }
+}
+
+async function openNutritionChat() {
+  if (!state.selectedPersonId) return showToast('Añade o selecciona una persona antes de abrir el chat');
+  renderChatContextLabel();
+  renderChatMessages();
+  els.nutritionChatInput.value = '';
+  els.nutritionChatDialog.showModal();
+  setTimeout(() => els.nutritionChatInput.focus(), 40);
+  await refreshChatBackendStatus();
+}
+
+async function pollChatResult(requestId) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const result = await chatJsonpRequest('nutrition_chat_result', { requestId }, 22000);
+    if (result?.status === 'pending') {
+      await new Promise(resolve => setTimeout(resolve, 900 + attempt * 120));
+      continue;
+    }
+    if (!result?.ok) throw new Error(result?.message || 'ChatGPT no ha podido responder.');
+    if (!result?.text) throw new Error('ChatGPT ha devuelto una respuesta vacía.');
+    return result;
+  }
+  throw new Error('No se ha recibido la respuesta de ChatGPT dentro del tiempo esperado.');
+}
+
+async function sendNutritionChat(event) {
+  event.preventDefault();
+  if (state.chatBusy || !state.selectedPersonId) return;
+  const text = String(els.nutritionChatInput.value || '').trim();
+  if (!text) return;
+  if (!navigator.onLine) return showToast('ChatGPT necesita conexión a Internet');
+  if (!state.chatBackendReady && !(await refreshChatBackendStatus())) return;
+
+  const previous = chatMessagesForPerson().slice(-CHAT_HISTORY_LIMIT).map(item => ({ role: item.role, text: item.text }));
+  const now = Date.now();
+  const userMessage = { id: makeId(), personId: state.selectedPersonId, role: 'user', text, date: state.selectedDate, createdAt: now, modifiedAt: now };
+  await nutritionPut('chatMessages', userMessage);
+  state.chatMessages.push(userMessage);
+  els.nutritionChatInput.value = '';
+  state.chatBusy = true;
+  els.nutritionChatSend.disabled = true;
+  renderChatMessages();
+
+  try {
+    const requestId = makeId().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 72);
+    await chatPost({ action: 'nutrition_chat', requestId, message: text, history: previous, context: buildChatContext() });
+    const result = await pollChatResult(requestId);
+    const responseTime = Date.now();
+    const assistantMessage = { id: makeId(), personId: state.selectedPersonId, role: 'assistant', text: result.text, date: state.selectedDate, model: result.model || state.chatBackendModel || '', createdAt: responseTime, modifiedAt: responseTime };
+    await nutritionPut('chatMessages', assistantMessage);
+    state.chatMessages.push(assistantMessage);
+    state.chatBackendModel = result.model || state.chatBackendModel;
+    setChatStatus('ready', 'ChatGPT conectado', state.chatBackendModel);
+  } catch (error) {
+    console.error('Chat nutricional:', error);
+    showToast(error?.message || 'No se pudo obtener respuesta de ChatGPT');
+    setChatStatus('error', 'Error en la última consulta', state.chatBackendModel);
+  } finally {
+    state.chatBusy = false;
+    els.nutritionChatSend.disabled = false;
+    renderChatMessages();
+    setTimeout(() => els.nutritionChatInput.focus(), 20);
+  }
+}
+
+async function clearNutritionChatHistory() {
+  const messages = chatMessagesForPerson();
+  if (!messages.length || state.chatBusy) return;
+  const user = state.users.find(item => item.id === state.selectedPersonId);
+  if (!confirm(`¿Empezar un chat nuevo para ${user?.name || 'esta persona'}? Se eliminará únicamente el historial local del chat.`)) return;
+  for (const message of messages) await nutritionRemove('chatMessages', message.id);
+  state.chatMessages = state.chatMessages.filter(item => item.personId !== state.selectedPersonId);
+  renderChatMessages();
+  showToast('Chat local reiniciado');
+}
+
 async function refreshForMealsView() {
   await loadNutritionState({ refreshUsers: true });
   renderAllNutrition();
@@ -733,6 +985,7 @@ function setupEvents() {
     state.selectedPersonId = els.mealPersonSelect.value;
     localStorage.setItem(LS_SELECTED_PERSON, state.selectedPersonId);
     renderAllNutrition();
+    if (els.nutritionChatDialog?.open) { renderChatContextLabel(); renderChatMessages(); }
   });
   els.mealPrevDay.addEventListener('click', () => setSelectedDate(shiftISO(state.selectedDate, -1)));
   els.mealToday.addEventListener('click', () => setSelectedDate(localISO()));
@@ -744,7 +997,25 @@ function setupEvents() {
   els.copyPreviousWeekButton.addEventListener('click', openCopyPreviousWeekDialog);
   els.newFoodButton.addEventListener('click', () => openFoodDialog());
   els.mealFoodSearch.addEventListener('input', renderFoods);
-  els.nutritionChatButton.addEventListener('click', () => showToast('Chat nutricional: próximamente en V11-C'));
+  els.nutritionChatButton.addEventListener('click', () => openNutritionChat().catch(console.error));
+
+  els.nutritionChatForm.addEventListener('submit', sendNutritionChat);
+  els.closeNutritionChat.addEventListener('click', () => els.nutritionChatDialog.close());
+  els.clearNutritionChat.addEventListener('click', () => clearNutritionChatHistory().catch(console.error));
+  els.nutritionChatSettingsButton.addEventListener('click', () => {
+    els.nutritionChatDialog.close();
+    document.querySelector('[data-view="settings"]')?.click();
+  });
+  document.querySelectorAll('[data-chat-prompt]').forEach(button => button.addEventListener('click', () => {
+    els.nutritionChatInput.value = button.dataset.chatPrompt || '';
+    els.nutritionChatInput.focus();
+  }));
+  els.nutritionChatInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      els.nutritionChatForm.requestSubmit();
+    }
+  });
 
   els.nutritionTargetsForm.addEventListener('submit', saveTargets);
   els.closeNutritionTargets.addEventListener('click', () => els.nutritionTargetsDialog.close());
