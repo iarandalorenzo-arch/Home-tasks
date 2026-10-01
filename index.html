@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V10.0.12</title>
+  <title>HomeTasks V11-A</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -22,7 +22,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V10.0.12 · actividad por tareas y minutos</p>
+          <p class="subtitle">V11-A · tareas + plan de comidas</p>
         </div>
       </div>
       <div class="top-actions">
@@ -321,6 +321,75 @@
         </article>
       </section>
 
+      <section id="view-meals" class="view meals-view" aria-labelledby="mealsTitle">
+        <div class="section-heading meals-heading">
+          <div>
+            <p class="eyebrow">Plan de comidas · beta local</p>
+            <h2 id="mealsTitle">Comidas</h2>
+            <p class="section-note">Planifica por persona y calcula calorías y macronutrientes sin afectar a la sincronización de tareas.</p>
+          </div>
+          <button id="nutritionChatButton" class="secondary-button nutrition-chat-button" type="button" title="Disponible en una versión futura">✨ Chat nutricional <small>Próximamente</small></button>
+        </div>
+
+        <article class="card meals-toolbar">
+          <label class="meal-person-field">
+            <span>Persona</span>
+            <select id="mealPersonSelect"></select>
+          </label>
+          <div class="meal-mode-tabs" role="tablist" aria-label="Vista de Comidas">
+            <button class="meal-mode-tab active" data-meals-mode="day" role="tab" aria-selected="true" type="button">Día</button>
+            <button class="meal-mode-tab" data-meals-mode="week" role="tab" aria-selected="false" type="button">Semana</button>
+            <button class="meal-mode-tab" data-meals-mode="foods" role="tab" aria-selected="false" type="button">Alimentos</button>
+          </div>
+        </article>
+
+        <div id="mealsEmptyUsers" class="card meals-empty-users" hidden>
+          <strong>No hay personas configuradas.</strong>
+          <span>Añade al menos una persona en Ajustes para crear objetivos y menús individuales.</span>
+        </div>
+
+        <div id="mealsDayPanel" class="meals-panel">
+          <article class="card meal-date-card">
+            <div class="meal-date-main">
+              <button id="mealPrevDay" class="icon-button" type="button" aria-label="Día anterior">←</button>
+              <div class="meal-date-copy"><span>Fecha</span><strong id="mealDateLabel">—</strong></div>
+              <button id="mealNextDay" class="icon-button" type="button" aria-label="Día siguiente">→</button>
+            </div>
+            <div class="meal-date-actions">
+              <input id="mealDateInput" type="date" aria-label="Fecha del menú" />
+              <button id="mealToday" class="secondary-button compact-button" type="button">Hoy</button>
+              <button id="mealCopyDayButton" class="secondary-button compact-button" type="button">Copiar día</button>
+            </div>
+          </article>
+
+          <div class="meal-targets-heading">
+            <div><p class="eyebrow">Totales del día</p><h3>Objetivos nutricionales</h3></div>
+            <button id="mealEditTargetsButton" class="secondary-button compact-button" type="button">Editar objetivos</button>
+          </div>
+          <div id="mealMacroGrid" class="meal-macro-grid"></div>
+          <div id="mealDayList" class="meal-day-list"></div>
+        </div>
+
+        <div id="mealsWeekPanel" class="meals-panel" hidden>
+          <div class="meal-week-heading">
+            <div><p class="eyebrow">Lunes a domingo</p><h3 id="mealWeekLabel">Semana</h3></div>
+            <p class="section-note">Pulsa un día para abrir su menú. “Copiar día” sustituye el menú de la fecha de destino si ya existe.</p>
+          </div>
+          <div id="mealWeekGrid" class="meal-week-grid"></div>
+        </div>
+
+        <div id="mealsFoodsPanel" class="meals-panel" hidden>
+          <div class="meal-foods-heading">
+            <div><p class="eyebrow">Biblioteca local</p><h3>Alimentos</h3><p class="section-note">Los valores se guardan por 100 g. Añade únicamente datos de una fuente que consideres fiable.</p></div>
+            <button id="newFoodButton" class="primary-button" type="button">+ Crear alimento</button>
+          </div>
+          <article class="card meal-food-search-card">
+            <label class="search-field"><span>Buscar alimento</span><input id="mealFoodSearch" type="search" placeholder="Yogur, avena, pollo…" autocomplete="off" /></label>
+          </article>
+          <div id="mealFoodList" class="meal-food-list"></div>
+        </div>
+      </section>
+
       <section id="view-settings" class="view" aria-labelledby="settingsTitle">
         <div class="section-heading">
           <div>
@@ -370,11 +439,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V10.0.12</h3>
+            <h3>Estado de V11-A</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Versión</span><strong>10.0.12</strong></div>
+            <div class="setting-row"><span>Versión</span><strong>V11-A</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -514,14 +583,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V10.0.12. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas e historico de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V10.0.12</button>
+            <p>Restablece HomeTasks a los datos iniciales de V11-A. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-A</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">10.0.12</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-A</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -559,6 +628,7 @@
       <button class="nav-item active" data-view="today" type="button"><span>☀</span><small>Hoy</small></button>
       <button class="nav-item" data-view="plan" type="button"><span>▦</span><small>Plan</small></button>
       <button class="nav-item" data-view="tasks" type="button"><span>✓</span><small>Tareas</small></button>
+      <button class="nav-item" data-view="meals" type="button"><span>🍽</span><small>Comidas</small></button>
       <button class="nav-item" data-view="routines" type="button"><span>↻</span><small>Rutinas</small></button>
       <button class="nav-item" data-view="history" type="button"><span>◷</span><small>Actividad</small></button>
       <button class="nav-item" data-view="settings" type="button"><span>⚙</span><small>Ajustes</small></button>
@@ -776,7 +846,81 @@
     </form>
   </dialog>
 
+  <dialog id="nutritionTargetsDialog" class="task-dialog nutrition-dialog">
+    <form id="nutritionTargetsForm" method="dialog">
+      <div class="dialog-header">
+        <div><p class="eyebrow">Configuración manual</p><h2 id="nutritionTargetsTitle">Objetivos nutricionales</h2></div>
+        <button id="closeNutritionTargets" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <p class="section-note">HomeTasks no calcula ni recomienda objetivos. Introduce los valores que quieras utilizar.</p>
+      <div class="form-grid nutrition-form-grid">
+        <label><span>Calorías / día</span><input id="targetKcal" type="number" min="0" step="1" inputmode="decimal" placeholder="kcal" /></label>
+        <label><span>Proteínas / día</span><input id="targetProtein" type="number" min="0" step="0.1" inputmode="decimal" placeholder="g" /></label>
+        <label><span>Carbohidratos / día</span><input id="targetCarbs" type="number" min="0" step="0.1" inputmode="decimal" placeholder="g" /></label>
+        <label><span>Grasas / día</span><input id="targetFat" type="number" min="0" step="0.1" inputmode="decimal" placeholder="g" /></label>
+        <label class="full-width"><span>Fibra / día <small>(opcional)</small></span><input id="targetFiber" type="number" min="0" step="0.1" inputmode="decimal" placeholder="g" /></label>
+      </div>
+      <div class="dialog-actions"><button id="cancelNutritionTargets" class="secondary-button" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar objetivos</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="foodDialog" class="task-dialog nutrition-dialog">
+    <form id="foodForm" method="dialog">
+      <div class="dialog-header">
+        <div><p class="eyebrow">Biblioteca de alimentos</p><h2 id="foodDialogTitle">Nuevo alimento</h2></div>
+        <button id="closeFoodDialog" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="form-grid nutrition-form-grid">
+        <label class="full-width"><span>Nombre</span><input id="foodName" type="text" maxlength="80" required placeholder="Nombre del alimento" /></label>
+        <label><span>kcal / 100 g</span><input id="foodKcal" type="number" min="0" step="0.1" inputmode="decimal" required /></label>
+        <label><span>Proteína / 100 g</span><input id="foodProtein" type="number" min="0" step="0.1" inputmode="decimal" required /></label>
+        <label><span>Carbohidratos / 100 g</span><input id="foodCarbs" type="number" min="0" step="0.1" inputmode="decimal" required /></label>
+        <label><span>Grasa / 100 g</span><input id="foodFat" type="number" min="0" step="0.1" inputmode="decimal" required /></label>
+        <label><span>Fibra / 100 g <small>(opcional)</small></span><input id="foodFiber" type="number" min="0" step="0.1" inputmode="decimal" /></label>
+        <label><span>Origen</span><select id="foodSource"><option>Manual</option><option>Etiqueta nutricional</option><option>ChatGPT</option></select></label>
+      </div>
+      <div class="dialog-actions task-dialog-actions">
+        <button id="deleteFoodButton" class="secondary-button dialog-delete-button" type="button" hidden>Eliminar alimento</button>
+        <button id="cancelFoodDialog" class="secondary-button" type="button">Cancelar</button>
+        <button class="primary-button" type="submit">Guardar alimento</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="mealEntryDialog" class="task-dialog nutrition-dialog">
+    <form id="mealEntryForm" method="dialog">
+      <div class="dialog-header">
+        <div><p class="eyebrow">Menú del día</p><h2 id="mealEntryDialogTitle">Añadir alimento</h2></div>
+        <button id="closeMealEntryDialog" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="form-grid nutrition-form-grid">
+        <label class="full-width"><span>Alimento</span><select id="mealEntryFood" required></select></label>
+        <label><span>Cantidad</span><div class="duration-input"><input id="mealEntryQuantity" type="number" min="0.1" step="0.1" inputmode="decimal" required /><span>g</span></div></label>
+        <label><span>Comida</span><select id="mealEntryType" required></select></label>
+      </div>
+      <div id="mealEntryPreview" class="meal-entry-preview"><span>Introduce una cantidad para calcular los valores.</span></div>
+      <div class="dialog-actions task-dialog-actions">
+        <button id="deleteMealEntryButton" class="secondary-button dialog-delete-button" type="button" hidden>Eliminar de la comida</button>
+        <button id="cancelMealEntryDialog" class="secondary-button" type="button">Cancelar</button>
+        <button class="primary-button" type="submit">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="copyDayDialog" class="task-dialog nutrition-dialog">
+    <form id="copyDayForm" method="dialog">
+      <div class="dialog-header">
+        <div><p class="eyebrow">Duplicar menú</p><h2>Copiar día</h2></div>
+        <button id="closeCopyDayDialog" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <p class="section-note">Origen: <strong id="copyDaySourceLabel">—</strong>. Si el destino ya tiene alimentos, su menú se sustituirá tras pedir confirmación.</p>
+      <label class="copy-day-date"><span>Fecha de destino</span><input id="copyDayDestination" type="date" required /></label>
+      <div class="dialog-actions"><button id="cancelCopyDayDialog" class="secondary-button" type="button">Cancelar</button><button class="primary-button" type="submit">Copiar menú</button></div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script type="module" src="app.js"></script>
+  <script type="module" src="meals.js"></script>
 </body>
 </html>

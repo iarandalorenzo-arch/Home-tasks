@@ -1,0 +1,599 @@
+import { getAll } from './db.js';
+import {
+  nutritionGetAll,
+  nutritionPut,
+  nutritionPutMany,
+  nutritionRemove,
+  resetNutritionDatabase,
+} from './nutrition-db.js';
+
+const NUTRITION_VERSION = '11-A';
+const LS_SELECTED_PERSON = 'hometasks-meals-person';
+const LS_SELECTED_DATE = 'hometasks-meals-date';
+const DEFAULT_MEAL_TYPES = [
+  { id: 'breakfast', name: 'Desayuno', order: 10, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
+  { id: 'lunch', name: 'Comida', order: 20, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
+  { id: 'snack', name: 'Merienda', order: 30, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
+  { id: 'dinner', name: 'Cena', order: 40, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
+];
+
+const makeId = () => (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function')
+  ? globalThis.crypto.randomUUID()
+  : `nutrition-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const localISO = (date = new Date()) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const parseISO = value => new Date(`${value}T12:00:00`);
+const shiftISO = (value, days) => {
+  const date = parseISO(value);
+  date.setDate(date.getDate() + days);
+  return localISO(date);
+};
+const mondayISO = value => {
+  const date = parseISO(value);
+  const day = date.getDay();
+  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+  return localISO(date);
+};
+const safeNumber = value => {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+};
+const escapeHTML = (value = '') => String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
+const formatNumber = (value, digits = 1) => new Intl.NumberFormat('es-ES', { maximumFractionDigits: digits }).format(Number(value) || 0);
+const formatKcal = value => `${formatNumber(value, 0)} kcal`;
+const formatMacro = value => `${formatNumber(value, 1)} g`;
+const formatDateLong = value => parseISO(value).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+const formatDateShort = value => parseISO(value).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
+
+const state = {
+  users: [],
+  foods: [],
+  targets: [],
+  mealTypes: [],
+  entries: [],
+  mode: 'day',
+  selectedPersonId: localStorage.getItem(LS_SELECTED_PERSON) || '',
+  selectedDate: /^\d{4}-\d{2}-\d{2}$/.test(localStorage.getItem(LS_SELECTED_DATE) || '') ? localStorage.getItem(LS_SELECTED_DATE) : localISO(),
+  editingFoodId: null,
+  editingEntryId: null,
+  copySourceDate: '',
+};
+
+const els = {};
+let toastTimer = null;
+
+function cacheElements() {
+  [
+    'mealPersonSelect','mealsEmptyUsers','mealsDayPanel','mealsWeekPanel','mealsFoodsPanel','mealDateLabel','mealDateInput',
+    'mealPrevDay','mealToday','mealNextDay','mealCopyDayButton','mealMacroGrid','mealDayList','mealEditTargetsButton',
+    'mealWeekLabel','mealWeekGrid','mealFoodSearch','mealFoodList','newFoodButton','nutritionChatButton',
+    'nutritionTargetsDialog','nutritionTargetsForm','nutritionTargetsTitle','targetKcal','targetProtein','targetCarbs','targetFat','targetFiber','closeNutritionTargets','cancelNutritionTargets',
+    'foodDialog','foodForm','foodDialogTitle','foodName','foodKcal','foodProtein','foodCarbs','foodFat','foodFiber','foodSource','deleteFoodButton','closeFoodDialog','cancelFoodDialog',
+    'mealEntryDialog','mealEntryForm','mealEntryDialogTitle','mealEntryFood','mealEntryQuantity','mealEntryType','mealEntryPreview','deleteMealEntryButton','closeMealEntryDialog','cancelMealEntryDialog',
+    'copyDayDialog','copyDayForm','copyDaySourceLabel','copyDayDestination','closeCopyDayDialog','cancelCopyDayDialog'
+  ].forEach(id => { els[id] = document.getElementById(id); });
+}
+
+function showToast(message) {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+async function ensureMealTypes() {
+  const existing = await nutritionGetAll('mealTypes');
+  if (!existing.length) await nutritionPutMany('mealTypes', DEFAULT_MEAL_TYPES);
+}
+
+async function loadNutritionState({ refreshUsers = true } = {}) {
+  const jobs = [
+    nutritionGetAll('foods'),
+    nutritionGetAll('targets'),
+    nutritionGetAll('mealTypes'),
+    nutritionGetAll('entries'),
+  ];
+  if (refreshUsers) jobs.unshift(getAll('users'));
+  const values = await Promise.all(jobs);
+  let offset = 0;
+  if (refreshUsers) state.users = values[offset++];
+  state.foods = values[offset++];
+  state.targets = values[offset++];
+  state.mealTypes = values[offset++];
+  state.entries = values[offset++];
+  state.users.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+  state.foods.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+  state.mealTypes.sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+  if (!state.users.some(user => user.id === state.selectedPersonId)) state.selectedPersonId = state.users[0]?.id || '';
+  if (state.selectedPersonId) localStorage.setItem(LS_SELECTED_PERSON, state.selectedPersonId);
+}
+
+function currentTarget() {
+  return state.targets.find(target => target.personId === state.selectedPersonId) || null;
+}
+
+function foodForEntry(entry) {
+  return state.foods.find(food => food.id === entry.foodId) || entry.foodSnapshot || null;
+}
+
+function nutritionForEntry(entry) {
+  const food = foodForEntry(entry);
+  const factor = safeNumber(entry.quantityGrams) / 100;
+  if (!food) return { kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 };
+  return {
+    kcal: safeNumber(food.kcal) * factor,
+    protein: safeNumber(food.protein) * factor,
+    carbs: safeNumber(food.carbs) * factor,
+    fat: safeNumber(food.fat) * factor,
+    fiber: safeNumber(food.fiber) * factor,
+  };
+}
+
+function addTotals(total, values) {
+  total.kcal += values.kcal;
+  total.protein += values.protein;
+  total.carbs += values.carbs;
+  total.fat += values.fat;
+  total.fiber += values.fiber;
+  return total;
+}
+
+function emptyTotals() {
+  return { kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 };
+}
+
+function entriesFor(personId, date, mealTypeId = null) {
+  return state.entries.filter(entry => entry.personId === personId && entry.date === date && (!mealTypeId || entry.mealTypeId === mealTypeId));
+}
+
+function totalsFor(personId, date, mealTypeId = null) {
+  return entriesFor(personId, date, mealTypeId).reduce((total, entry) => addTotals(total, nutritionForEntry(entry)), emptyTotals());
+}
+
+function macroCard(label, key, unit, total, target) {
+  const consumed = total[key];
+  const goal = safeNumber(target?.[key]);
+  const percentage = goal > 0 ? consumed / goal * 100 : null;
+  const remaining = goal > 0 ? Math.max(0, goal - consumed) : null;
+  const displayConsumed = key === 'kcal' ? formatNumber(consumed, 0) : formatNumber(consumed, 1);
+  const displayGoal = goal > 0 ? (key === 'kcal' ? formatNumber(goal, 0) : formatNumber(goal, 1)) : '—';
+  const remainingText = remaining === null ? 'Objetivo sin configurar' : `Restante: ${key === 'kcal' ? formatNumber(remaining, 0) : formatNumber(remaining, 1)} ${unit}`;
+  return `<article class="card meal-macro-card">
+    <div class="meal-macro-head"><span>${escapeHTML(label)}</span><strong>${percentage === null ? '—' : `${formatNumber(percentage, 0)} %`}</strong></div>
+    <div class="meal-macro-value"><strong>${displayConsumed}</strong><span>/ ${displayGoal} ${escapeHTML(unit)}</span></div>
+    <div class="meal-progress" aria-hidden="true"><span style="width:${percentage === null ? 0 : Math.min(100, Math.max(0, percentage))}%"></span></div>
+    <small>${escapeHTML(remainingText)}</small>
+  </article>`;
+}
+
+function renderPersonSelect() {
+  if (!els.mealPersonSelect) return;
+  els.mealPersonSelect.innerHTML = state.users.length
+    ? state.users.map(user => `<option value="${escapeHTML(user.id)}">${escapeHTML(user.name)}</option>`).join('')
+    : '<option value="">Sin personas</option>';
+  els.mealPersonSelect.value = state.selectedPersonId;
+  els.mealPersonSelect.disabled = !state.users.length;
+  els.mealsEmptyUsers.hidden = state.users.length > 0;
+}
+
+function renderDateControls() {
+  els.mealDateInput.value = state.selectedDate;
+  els.mealDateLabel.textContent = formatDateLong(state.selectedDate);
+}
+
+function renderMacros() {
+  const totals = totalsFor(state.selectedPersonId, state.selectedDate);
+  const target = currentTarget();
+  els.mealMacroGrid.innerHTML = [
+    macroCard('Calorías', 'kcal', 'kcal', totals, target),
+    macroCard('Proteínas', 'protein', 'g', totals, target),
+    macroCard('Carbohidratos', 'carbs', 'g', totals, target),
+    macroCard('Grasas', 'fat', 'g', totals, target),
+  ].join('');
+}
+
+function entryRow(entry) {
+  const food = foodForEntry(entry);
+  const values = nutritionForEntry(entry);
+  const name = food?.name || 'Alimento eliminado';
+  return `<button class="meal-food-row" type="button" data-entry-id="${escapeHTML(entry.id)}">
+    <span class="meal-food-main"><strong>${escapeHTML(name)}</strong><small>${formatNumber(entry.quantityGrams, 1)} g</small></span>
+    <span class="meal-food-energy">${formatKcal(values.kcal)}</span>
+    <span class="meal-food-macros">P ${formatNumber(values.protein,1)} · C ${formatNumber(values.carbs,1)} · G ${formatNumber(values.fat,1)}</span>
+    <span class="meal-food-edit" aria-hidden="true">Editar</span>
+  </button>`;
+}
+
+function renderDayMeals() {
+  if (!state.selectedPersonId) {
+    els.mealDayList.innerHTML = '';
+    return;
+  }
+  els.mealDayList.innerHTML = state.mealTypes.map(type => {
+    const entries = entriesFor(state.selectedPersonId, state.selectedDate, type.id);
+    const subtotal = totalsFor(state.selectedPersonId, state.selectedDate, type.id);
+    return `<article class="card meal-card" data-meal-type-id="${escapeHTML(type.id)}">
+      <div class="meal-card-head">
+        <div><p class="eyebrow">Comida</p><h3>${escapeHTML(type.name)}</h3></div>
+        <div class="meal-subtotal"><strong>${formatKcal(subtotal.kcal)}</strong><small>P ${formatNumber(subtotal.protein,1)} · C ${formatNumber(subtotal.carbs,1)} · G ${formatNumber(subtotal.fat,1)}</small></div>
+      </div>
+      <div class="meal-food-rows">${entries.length ? entries.map(entryRow).join('') : '<div class="meal-empty">Todavía no hay alimentos en esta comida.</div>'}</div>
+      <button class="secondary-button meal-add-food" type="button" data-meal-type-id="${escapeHTML(type.id)}">+ Añadir alimento</button>
+    </article>`;
+  }).join('');
+  els.mealDayList.querySelectorAll('.meal-add-food').forEach(button => button.addEventListener('click', () => openEntryDialog(null, button.dataset.mealTypeId)));
+  els.mealDayList.querySelectorAll('.meal-food-row').forEach(button => button.addEventListener('click', () => openEntryDialog(button.dataset.entryId)));
+}
+
+function renderDay() {
+  renderDateControls();
+  renderMacros();
+  renderDayMeals();
+  els.mealEditTargetsButton.disabled = !state.selectedPersonId;
+  els.mealCopyDayButton.disabled = !state.selectedPersonId || !entriesFor(state.selectedPersonId, state.selectedDate).length;
+}
+
+function renderWeek() {
+  if (!state.selectedPersonId) {
+    els.mealWeekGrid.innerHTML = '';
+    els.mealWeekLabel.textContent = 'Semana';
+    return;
+  }
+  const start = mondayISO(state.selectedDate);
+  const end = shiftISO(start, 6);
+  els.mealWeekLabel.textContent = `${parseISO(start).toLocaleDateString('es-ES',{day:'numeric',month:'short'})} – ${parseISO(end).toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'})}`;
+  const days = Array.from({ length: 7 }, (_, index) => shiftISO(start, index));
+  els.mealWeekGrid.innerHTML = days.map(date => {
+    const dayEntries = entriesFor(state.selectedPersonId, date);
+    const totals = totalsFor(state.selectedPersonId, date);
+    const meals = new Set(dayEntries.map(entry => entry.mealTypeId)).size;
+    return `<article class="card meal-week-day ${date === localISO() ? 'is-today' : ''}" data-date="${date}">
+      <button class="meal-week-open" type="button" data-date="${date}">
+        <span>${escapeHTML(formatDateShort(date))}</span>
+        <strong>${meals} comida${meals === 1 ? '' : 's'}</strong>
+        <b>${formatKcal(totals.kcal)}</b>
+        <small>P ${formatNumber(totals.protein,1)} g · C ${formatNumber(totals.carbs,1)} g · G ${formatNumber(totals.fat,1)} g</small>
+      </button>
+      <button class="secondary-button compact-button meal-week-copy" type="button" data-date="${date}" ${dayEntries.length ? '' : 'disabled'}>Copiar día</button>
+    </article>`;
+  }).join('');
+  els.mealWeekGrid.querySelectorAll('.meal-week-open').forEach(button => button.addEventListener('click', () => {
+    setSelectedDate(button.dataset.date);
+    setMode('day');
+  }));
+  els.mealWeekGrid.querySelectorAll('.meal-week-copy').forEach(button => button.addEventListener('click', () => openCopyDayDialog(button.dataset.date)));
+}
+
+function renderFoods() {
+  const query = String(els.mealFoodSearch.value || '').trim().toLocaleLowerCase('es');
+  const foods = state.foods.filter(food => !query || String(food.name || '').toLocaleLowerCase('es').includes(query));
+  if (!foods.length) {
+    els.mealFoodList.innerHTML = `<div class="card meal-library-empty">${state.foods.length ? 'No hay alimentos que coincidan con la búsqueda.' : 'La biblioteca está vacía. Crea tu primer alimento con los valores de su etiqueta o una fuente de confianza.'}</div>`;
+    return;
+  }
+  els.mealFoodList.innerHTML = foods.map(food => `<article class="card meal-library-row" data-food-id="${escapeHTML(food.id)}">
+    <div class="meal-library-name"><strong>${escapeHTML(food.name)}</strong><small>${escapeHTML(food.source || 'Manual')} · valores por 100 g</small></div>
+    <div class="meal-library-kcal">${formatKcal(food.kcal)}</div>
+    <div class="meal-library-macros">P ${formatNumber(food.protein,1)} · C ${formatNumber(food.carbs,1)} · G ${formatNumber(food.fat,1)}${safeNumber(food.fiber) ? ` · Fibra ${formatNumber(food.fiber,1)}` : ''}</div>
+    <div class="meal-library-actions">
+      <button class="secondary-button compact-button food-quick-add" type="button" ${state.selectedPersonId ? '' : 'disabled'}>Añadir</button>
+      <button class="secondary-button compact-button food-edit" type="button">Editar</button>
+    </div>
+  </article>`).join('');
+  els.mealFoodList.querySelectorAll('.meal-library-row').forEach(row => {
+    row.querySelector('.food-edit').addEventListener('click', () => openFoodDialog(row.dataset.foodId));
+    row.querySelector('.food-quick-add').addEventListener('click', () => openEntryDialog(null, state.mealTypes[0]?.id, row.dataset.foodId));
+  });
+}
+
+function setMode(mode) {
+  state.mode = ['day','week','foods'].includes(mode) ? mode : 'day';
+  document.querySelectorAll('[data-meals-mode]').forEach(button => {
+    const active = button.dataset.mealsMode === state.mode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  els.mealsDayPanel.hidden = state.mode !== 'day';
+  els.mealsWeekPanel.hidden = state.mode !== 'week';
+  els.mealsFoodsPanel.hidden = state.mode !== 'foods';
+  if (state.mode === 'day') renderDay();
+  else if (state.mode === 'week') renderWeek();
+  else renderFoods();
+}
+
+function renderAllNutrition() {
+  renderPersonSelect();
+  setMode(state.mode);
+}
+
+function setSelectedDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return;
+  state.selectedDate = value;
+  localStorage.setItem(LS_SELECTED_DATE, value);
+  if (state.mode === 'week') renderWeek();
+  else renderDay();
+}
+
+function openTargetsDialog() {
+  if (!state.selectedPersonId) return;
+  const user = state.users.find(item => item.id === state.selectedPersonId);
+  const target = currentTarget();
+  els.nutritionTargetsTitle.textContent = `Objetivos · ${user?.name || 'Persona'}`;
+  els.targetKcal.value = target?.kcal ?? '';
+  els.targetProtein.value = target?.protein ?? '';
+  els.targetCarbs.value = target?.carbs ?? '';
+  els.targetFat.value = target?.fat ?? '';
+  els.targetFiber.value = target?.fiber ?? '';
+  els.nutritionTargetsDialog.showModal();
+}
+
+async function saveTargets(event) {
+  event.preventDefault();
+  if (!state.selectedPersonId) return;
+  const now = Date.now();
+  const previous = currentTarget();
+  const target = {
+    personId: state.selectedPersonId,
+    kcal: safeNumber(els.targetKcal.value),
+    protein: safeNumber(els.targetProtein.value),
+    carbs: safeNumber(els.targetCarbs.value),
+    fat: safeNumber(els.targetFat.value),
+    fiber: safeNumber(els.targetFiber.value),
+    createdAt: previous?.createdAt || now,
+    modifiedAt: now,
+    syncVersion: 1,
+  };
+  await nutritionPut('targets', target);
+  els.nutritionTargetsDialog.close();
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  showToast('Objetivos nutricionales guardados');
+}
+
+function openFoodDialog(foodId = null) {
+  state.editingFoodId = foodId;
+  const food = foodId ? state.foods.find(item => item.id === foodId) : null;
+  els.foodDialogTitle.textContent = food ? 'Editar alimento' : 'Nuevo alimento';
+  els.foodName.value = food?.name || '';
+  els.foodKcal.value = food?.kcal ?? '';
+  els.foodProtein.value = food?.protein ?? '';
+  els.foodCarbs.value = food?.carbs ?? '';
+  els.foodFat.value = food?.fat ?? '';
+  els.foodFiber.value = food?.fiber ?? '';
+  els.foodSource.value = food?.source || 'Manual';
+  els.deleteFoodButton.hidden = !food;
+  els.foodDialog.showModal();
+  setTimeout(() => els.foodName.focus(), 20);
+}
+
+async function saveFood(event) {
+  event.preventDefault();
+  const name = els.foodName.value.trim();
+  if (!name) return;
+  const now = Date.now();
+  const previous = state.editingFoodId ? state.foods.find(item => item.id === state.editingFoodId) : null;
+  const food = {
+    id: previous?.id || makeId(),
+    name,
+    kcal: safeNumber(els.foodKcal.value),
+    protein: safeNumber(els.foodProtein.value),
+    carbs: safeNumber(els.foodCarbs.value),
+    fat: safeNumber(els.foodFat.value),
+    fiber: safeNumber(els.foodFiber.value),
+    source: els.foodSource.value || 'Manual',
+    createdAt: previous?.createdAt || now,
+    modifiedAt: now,
+    syncVersion: 1,
+  };
+  await nutritionPut('foods', food);
+  state.editingFoodId = null;
+  els.foodDialog.close();
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  showToast(previous ? 'Alimento actualizado' : 'Alimento creado');
+}
+
+async function deleteFood() {
+  const food = state.foods.find(item => item.id === state.editingFoodId);
+  if (!food) return;
+  if (!confirm(`¿Eliminar “${food.name}” de la biblioteca? Los menús ya planificados conservarán una copia de sus valores.`)) return;
+  await nutritionRemove('foods', food.id);
+  state.editingFoodId = null;
+  els.foodDialog.close();
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  showToast('Alimento eliminado');
+}
+
+function populateEntrySelectors(selectedFoodId = '', selectedMealTypeId = '') {
+  els.mealEntryFood.innerHTML = state.foods.map(food => `<option value="${escapeHTML(food.id)}">${escapeHTML(food.name)}</option>`).join('');
+  els.mealEntryType.innerHTML = state.mealTypes.map(type => `<option value="${escapeHTML(type.id)}">${escapeHTML(type.name)}</option>`).join('');
+  if (selectedFoodId && state.foods.some(food => food.id === selectedFoodId)) els.mealEntryFood.value = selectedFoodId;
+  if (selectedMealTypeId && state.mealTypes.some(type => type.id === selectedMealTypeId)) els.mealEntryType.value = selectedMealTypeId;
+}
+
+function updateEntryPreview() {
+  const food = state.foods.find(item => item.id === els.mealEntryFood.value);
+  const quantity = safeNumber(els.mealEntryQuantity.value);
+  if (!food || !quantity) {
+    els.mealEntryPreview.innerHTML = '<span>Introduce una cantidad para calcular los valores.</span>';
+    return;
+  }
+  const factor = quantity / 100;
+  els.mealEntryPreview.innerHTML = `<strong>${formatKcal(food.kcal * factor)}</strong><span>P ${formatNumber(food.protein * factor,1)} g · C ${formatNumber(food.carbs * factor,1)} g · G ${formatNumber(food.fat * factor,1)} g</span>`;
+}
+
+function openEntryDialog(entryId = null, presetMealTypeId = '', presetFoodId = '') {
+  if (!state.selectedPersonId) {
+    showToast('Añade primero una persona en Ajustes');
+    return;
+  }
+  if (!state.foods.length) {
+    setMode('foods');
+    openFoodDialog();
+    showToast('Crea primero un alimento');
+    return;
+  }
+  state.editingEntryId = entryId;
+  const entry = entryId ? state.entries.find(item => item.id === entryId) : null;
+  els.mealEntryDialogTitle.textContent = entry ? 'Editar alimento de la comida' : 'Añadir alimento';
+  const activeFoodId = entry?.foodId || presetFoodId || state.foods[0]?.id || '';
+  const activeMealTypeId = entry?.mealTypeId || presetMealTypeId || state.mealTypes[0]?.id || '';
+  populateEntrySelectors(activeFoodId, activeMealTypeId);
+  els.mealEntryQuantity.value = entry?.quantityGrams ?? 100;
+  els.deleteMealEntryButton.hidden = !entry;
+  updateEntryPreview();
+  els.mealEntryDialog.showModal();
+}
+
+async function saveEntry(event) {
+  event.preventDefault();
+  const food = state.foods.find(item => item.id === els.mealEntryFood.value);
+  const quantity = safeNumber(els.mealEntryQuantity.value);
+  if (!food || quantity <= 0 || !state.selectedPersonId) {
+    showToast('Selecciona alimento y una cantidad mayor que cero');
+    return;
+  }
+  const now = Date.now();
+  const previous = state.editingEntryId ? state.entries.find(item => item.id === state.editingEntryId) : null;
+  const entry = {
+    id: previous?.id || makeId(),
+    personId: state.selectedPersonId,
+    date: state.selectedDate,
+    mealTypeId: els.mealEntryType.value,
+    foodId: food.id,
+    foodSnapshot: {
+      id: food.id,
+      name: food.name,
+      kcal: safeNumber(food.kcal),
+      protein: safeNumber(food.protein),
+      carbs: safeNumber(food.carbs),
+      fat: safeNumber(food.fat),
+      fiber: safeNumber(food.fiber),
+      source: food.source || 'Manual',
+    },
+    quantityGrams: quantity,
+    createdAt: previous?.createdAt || now,
+    modifiedAt: now,
+    syncVersion: 1,
+  };
+  await nutritionPut('entries', entry);
+  state.editingEntryId = null;
+  els.mealEntryDialog.close();
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  showToast(previous ? 'Cantidad actualizada' : 'Alimento añadido');
+}
+
+async function deleteEntry() {
+  if (!state.editingEntryId) return;
+  await nutritionRemove('entries', state.editingEntryId);
+  state.editingEntryId = null;
+  els.mealEntryDialog.close();
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  showToast('Alimento retirado de la comida');
+}
+
+function openCopyDayDialog(sourceDate = state.selectedDate) {
+  if (!state.selectedPersonId || !entriesFor(state.selectedPersonId, sourceDate).length) return;
+  state.copySourceDate = sourceDate;
+  els.copyDaySourceLabel.textContent = formatDateLong(sourceDate);
+  els.copyDayDestination.value = shiftISO(sourceDate, 1);
+  els.copyDayDialog.showModal();
+}
+
+async function copyDay(event) {
+  event.preventDefault();
+  const destination = els.copyDayDestination.value;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(destination) || destination === state.copySourceDate) {
+    showToast('Elige una fecha de destino diferente');
+    return;
+  }
+  const sourceEntries = entriesFor(state.selectedPersonId, state.copySourceDate);
+  if (!sourceEntries.length) return;
+  const existing = entriesFor(state.selectedPersonId, destination);
+  if (existing.length && !confirm('El día de destino ya tiene alimentos. Se sustituirá su menú completo. ¿Continuar?')) return;
+  for (const entry of existing) await nutritionRemove('entries', entry.id);
+  const now = Date.now();
+  const copies = sourceEntries.map(entry => ({ ...entry, id: makeId(), date: destination, createdAt: now, modifiedAt: now, syncVersion: 1 }));
+  await nutritionPutMany('entries', copies);
+  els.copyDayDialog.close();
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  showToast('Día copiado');
+}
+
+async function refreshForMealsView() {
+  await loadNutritionState({ refreshUsers: true });
+  renderAllNutrition();
+}
+
+function setupEvents() {
+  document.querySelectorAll('[data-meals-mode]').forEach(button => button.addEventListener('click', () => setMode(button.dataset.mealsMode)));
+  document.querySelector('[data-view="meals"]')?.addEventListener('click', () => refreshForMealsView().catch(console.error));
+  els.mealPersonSelect.addEventListener('change', () => {
+    state.selectedPersonId = els.mealPersonSelect.value;
+    localStorage.setItem(LS_SELECTED_PERSON, state.selectedPersonId);
+    renderAllNutrition();
+  });
+  els.mealPrevDay.addEventListener('click', () => setSelectedDate(shiftISO(state.selectedDate, -1)));
+  els.mealToday.addEventListener('click', () => setSelectedDate(localISO()));
+  els.mealNextDay.addEventListener('click', () => setSelectedDate(shiftISO(state.selectedDate, 1)));
+  els.mealDateInput.addEventListener('change', () => setSelectedDate(els.mealDateInput.value));
+  els.mealEditTargetsButton.addEventListener('click', openTargetsDialog);
+  els.mealCopyDayButton.addEventListener('click', () => openCopyDayDialog(state.selectedDate));
+  els.newFoodButton.addEventListener('click', () => openFoodDialog());
+  els.mealFoodSearch.addEventListener('input', renderFoods);
+  els.nutritionChatButton.addEventListener('click', () => showToast('Chat nutricional: próximamente en V11-C'));
+
+  els.nutritionTargetsForm.addEventListener('submit', saveTargets);
+  els.closeNutritionTargets.addEventListener('click', () => els.nutritionTargetsDialog.close());
+  els.cancelNutritionTargets.addEventListener('click', () => els.nutritionTargetsDialog.close());
+
+  els.foodForm.addEventListener('submit', saveFood);
+  els.deleteFoodButton.addEventListener('click', deleteFood);
+  els.closeFoodDialog.addEventListener('click', () => { state.editingFoodId = null; els.foodDialog.close(); });
+  els.cancelFoodDialog.addEventListener('click', () => { state.editingFoodId = null; els.foodDialog.close(); });
+
+  els.mealEntryForm.addEventListener('submit', saveEntry);
+  els.mealEntryFood.addEventListener('change', updateEntryPreview);
+  els.mealEntryQuantity.addEventListener('input', updateEntryPreview);
+  els.deleteMealEntryButton.addEventListener('click', deleteEntry);
+  els.closeMealEntryDialog.addEventListener('click', () => { state.editingEntryId = null; els.mealEntryDialog.close(); });
+  els.cancelMealEntryDialog.addEventListener('click', () => { state.editingEntryId = null; els.mealEntryDialog.close(); });
+
+  els.copyDayForm.addEventListener('submit', copyDay);
+  els.closeCopyDayDialog.addEventListener('click', () => els.copyDayDialog.close());
+  els.cancelCopyDayDialog.addEventListener('click', () => els.copyDayDialog.close());
+
+  window.addEventListener('hometasks:core-reset', async () => {
+    await resetNutritionDatabase();
+    await ensureMealTypes();
+    await loadNutritionState({ refreshUsers: true });
+    renderAllNutrition();
+  });
+}
+
+async function initNutrition() {
+  cacheElements();
+  await ensureMealTypes();
+  await loadNutritionState({ refreshUsers: true });
+  setupEvents();
+  renderAllNutrition();
+  document.documentElement.dataset.nutritionVersion = NUTRITION_VERSION;
+}
+
+initNutrition().catch(error => {
+  console.error('No se pudo iniciar el módulo Comidas:', error);
+  const panel = document.getElementById('mealsDayPanel');
+  if (panel) panel.innerHTML = '<article class="card meal-library-empty">No se pudo abrir el almacenamiento local del módulo Comidas.</article>';
+});

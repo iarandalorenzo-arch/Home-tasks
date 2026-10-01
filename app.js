@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '10.0.12';
+const APP_VERSION = '11-A';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -1847,7 +1847,7 @@ function renderSettings() {
   els.houseNameInput.value = houseName;
   renderUsers();
   renderRoomSettings();
-  if (els.appVersionDisplay) els.appVersionDisplay.textContent = APP_VERSION;
+  if (els.appVersionDisplay) els.appVersionDisplay.textContent = `V${APP_VERSION}`;
   if (els.lastForcedUpdate) els.lastForcedUpdate.textContent = formatSyncTime(localStorage.getItem('hometasks-last-forced-update'));
   renderNotificationSettings();
   renderSyncPanel();
@@ -3781,7 +3781,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V10.0.12 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V11-A en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3798,7 +3798,8 @@ function setupEvents() {
     els.statusFilter.value = 'pending';
     els.assigneeFilter.value = 'all';
     renderAll();
-    showToast('V10.0.12 restablecida');
+    window.dispatchEvent(new CustomEvent('hometasks:core-reset'));
+    showToast('V11-A restablecida');
   });
 
   window.addEventListener('online', updateConnection);
