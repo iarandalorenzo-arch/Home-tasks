@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V11-A</title>
+  <title>HomeTasks V11-B</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -22,7 +22,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V11-A · tareas + plan de comidas</p>
+          <p class="subtitle">V11-B · tareas + plan de comidas</p>
         </div>
       </div>
       <div class="top-actions">
@@ -367,13 +367,20 @@
             <button id="mealEditTargetsButton" class="secondary-button compact-button" type="button">Editar objetivos</button>
           </div>
           <div id="mealMacroGrid" class="meal-macro-grid"></div>
+          <div class="meal-list-heading">
+            <div><p class="eyebrow">Menú</p><h3>Comidas del día</h3></div>
+            <button id="manageMealTypesButton" class="secondary-button compact-button" type="button">Gestionar comidas</button>
+          </div>
           <div id="mealDayList" class="meal-day-list"></div>
         </div>
 
         <div id="mealsWeekPanel" class="meals-panel" hidden>
           <div class="meal-week-heading">
             <div><p class="eyebrow">Lunes a domingo</p><h3 id="mealWeekLabel">Semana</h3></div>
-            <p class="section-note">Pulsa un día para abrir su menú. “Copiar día” sustituye el menú de la fecha de destino si ya existe.</p>
+            <div class="meal-week-heading-actions">
+              <p class="section-note">Pulsa un día para abrir su menú. “Copiar día” sustituye el menú de la fecha de destino si ya existe.</p>
+              <button id="copyPreviousWeekButton" class="secondary-button compact-button" type="button">Copiar semana anterior</button>
+            </div>
           </div>
           <div id="mealWeekGrid" class="meal-week-grid"></div>
         </div>
@@ -439,11 +446,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V11-A</h3>
+            <h3>Estado de V11-B</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Versión</span><strong>V11-A</strong></div>
+            <div class="setting-row"><span>Versión</span><strong>V11-B</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -583,14 +590,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V11-A. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-A</button>
+            <p>Restablece HomeTasks a los datos iniciales de V11-B. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-B</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-A</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-B</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -916,6 +923,46 @@
       <p class="section-note">Origen: <strong id="copyDaySourceLabel">—</strong>. Si el destino ya tiene alimentos, su menú se sustituirá tras pedir confirmación.</p>
       <label class="copy-day-date"><span>Fecha de destino</span><input id="copyDayDestination" type="date" required /></label>
       <div class="dialog-actions"><button id="cancelCopyDayDialog" class="secondary-button" type="button">Cancelar</button><button class="primary-button" type="submit">Copiar menú</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="mealTypesDialog" class="task-dialog nutrition-dialog">
+    <div class="dialog-header">
+      <div><p class="eyebrow">Configuración del menú</p><h2>Tipos de comida</h2></div>
+      <button id="closeMealTypesDialog" class="icon-button" type="button" aria-label="Cerrar">×</button>
+    </div>
+    <p class="section-note">Crea, renombra y reordena las comidas. El orden se aplica a todos los días y personas de este dispositivo.</p>
+    <div id="mealTypeManagerList" class="meal-type-manager-list"></div>
+    <div class="dialog-actions">
+      <button id="newMealTypeButton" class="primary-button" type="button">+ Nueva comida</button>
+      <button id="closeMealTypesDialogFooter" class="secondary-button" type="button">Cerrar</button>
+    </div>
+  </dialog>
+
+  <dialog id="mealTypeNameDialog" class="task-dialog nutrition-dialog compact-nutrition-dialog">
+    <form id="mealTypeNameForm" method="dialog">
+      <div class="dialog-header">
+        <div><p class="eyebrow">Configuración del menú</p><h2 id="mealTypeNameDialogTitle">Nueva comida</h2></div>
+        <button id="closeMealTypeNameDialog" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <label class="copy-day-date"><span>Nombre</span><input id="mealTypeNameInput" type="text" maxlength="40" required placeholder="Ej. Tentempié" /></label>
+      <div class="dialog-actions"><button id="cancelMealTypeNameDialog" class="secondary-button" type="button">Cancelar</button><button class="primary-button" type="submit">Guardar</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="copyWeekDialog" class="task-dialog nutrition-dialog">
+    <form id="copyWeekForm" method="dialog">
+      <div class="dialog-header">
+        <div><p class="eyebrow">Duplicar planificación</p><h2>Copiar semana anterior</h2></div>
+        <button id="closeCopyWeekDialog" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="copy-week-summary">
+        <div><span>Origen</span><strong id="copyWeekSourceLabel">—</strong></div>
+        <div class="copy-week-arrow" aria-hidden="true">→</div>
+        <div><span>Destino</span><strong id="copyWeekDestinationLabel">—</strong></div>
+      </div>
+      <p id="copyWeekWarning" class="meal-copy-warning"></p>
+      <div class="dialog-actions"><button id="cancelCopyWeekDialog" class="secondary-button" type="button">Cancelar</button><button class="primary-button" type="submit">Copiar semana</button></div>
     </form>
   </dialog>
 

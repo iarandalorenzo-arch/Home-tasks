@@ -1560,3 +1560,40 @@ html.tablet-ui .meal-week-grid { grid-template-columns: repeat(7,minmax(0,1fr));
 html.tablet-ui .meal-week-day { padding: 8px; }
 html.tablet-ui .meal-week-open b { font-size: 15px; }
 html.tablet-ui .meal-week-open small { font-size: 8px; }
+
+
+/* V11-B - gestión de tipos de comida y copia semanal. */
+.meal-list-heading { display:flex; align-items:end; justify-content:space-between; gap:14px; margin:4px 2px 10px; }
+.meal-list-heading h3 { margin:1px 0 0; }
+.meal-week-heading-actions { display:grid; justify-items:end; gap:8px; max-width:560px; }
+.meal-week-heading-actions .section-note { margin:0; }
+.meal-type-manager-list { display:grid; gap:8px; margin-top:14px; max-height:min(52vh,460px); overflow:auto; padding-right:2px; }
+.meal-type-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; padding:11px 12px; border:1px solid var(--border); border-radius:13px; background:var(--surface-2); }
+.meal-type-info { display:grid; gap:2px; min-width:0; }
+.meal-type-info strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.meal-type-info small { color:var(--muted); font-size:9px; }
+.meal-type-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:5px; }
+.meal-type-actions .compact-button { min-width:34px; }
+.compact-nutrition-dialog { width:min(460px,calc(100% - 24px)); }
+.copy-week-summary { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:12px; align-items:center; margin-top:14px; padding:13px; border:1px solid var(--border); border-radius:13px; background:var(--surface-2); }
+.copy-week-summary > div:not(.copy-week-arrow) { display:grid; gap:3px; }
+.copy-week-summary span { color:var(--muted); font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
+.copy-week-summary strong { font-size:12px; text-transform:capitalize; }
+.copy-week-arrow { color:var(--accent); font-size:20px; font-weight:900; }
+.meal-copy-warning { margin:10px 0 0; padding:10px 12px; border-radius:11px; background:var(--surface-2); color:var(--muted); font-size:10px; line-height:1.45; }
+
+@media (max-width:700px) {
+  .meal-list-heading { align-items:center; }
+  .meal-week-heading-actions { justify-items:stretch; max-width:none; }
+  .meal-week-heading-actions .section-note { text-align:left; }
+  .meal-type-row { grid-template-columns:1fr; }
+  .meal-type-actions { justify-content:flex-start; }
+}
+
+@media (max-width:460px) {
+  .meal-list-heading { display:grid; align-items:stretch; }
+  .meal-list-heading .secondary-button { width:100%; }
+  .copy-week-summary { grid-template-columns:1fr; }
+  .copy-week-arrow { transform:rotate(90deg); justify-self:center; line-height:1; }
+  .meal-type-actions { display:grid; grid-template-columns:auto auto 1fr 1fr; }
+}

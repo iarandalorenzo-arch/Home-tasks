@@ -7,7 +7,7 @@ import {
   resetNutritionDatabase,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '11-A';
+const NUTRITION_VERSION = '11-B';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
 const DEFAULT_MEAL_TYPES = [
@@ -62,7 +62,10 @@ const state = {
   selectedDate: /^\d{4}-\d{2}-\d{2}$/.test(localStorage.getItem(LS_SELECTED_DATE) || '') ? localStorage.getItem(LS_SELECTED_DATE) : localISO(),
   editingFoodId: null,
   editingEntryId: null,
+  editingMealTypeId: null,
   copySourceDate: '',
+  copyWeekSourceStart: '',
+  copyWeekDestinationStart: '',
 };
 
 const els = {};
@@ -71,12 +74,15 @@ let toastTimer = null;
 function cacheElements() {
   [
     'mealPersonSelect','mealsEmptyUsers','mealsDayPanel','mealsWeekPanel','mealsFoodsPanel','mealDateLabel','mealDateInput',
-    'mealPrevDay','mealToday','mealNextDay','mealCopyDayButton','mealMacroGrid','mealDayList','mealEditTargetsButton',
-    'mealWeekLabel','mealWeekGrid','mealFoodSearch','mealFoodList','newFoodButton','nutritionChatButton',
+    'mealPrevDay','mealToday','mealNextDay','mealCopyDayButton','mealMacroGrid','mealDayList','mealEditTargetsButton','manageMealTypesButton',
+    'mealWeekLabel','mealWeekGrid','copyPreviousWeekButton','mealFoodSearch','mealFoodList','newFoodButton','nutritionChatButton',
     'nutritionTargetsDialog','nutritionTargetsForm','nutritionTargetsTitle','targetKcal','targetProtein','targetCarbs','targetFat','targetFiber','closeNutritionTargets','cancelNutritionTargets',
     'foodDialog','foodForm','foodDialogTitle','foodName','foodKcal','foodProtein','foodCarbs','foodFat','foodFiber','foodSource','deleteFoodButton','closeFoodDialog','cancelFoodDialog',
     'mealEntryDialog','mealEntryForm','mealEntryDialogTitle','mealEntryFood','mealEntryQuantity','mealEntryType','mealEntryPreview','deleteMealEntryButton','closeMealEntryDialog','cancelMealEntryDialog',
-    'copyDayDialog','copyDayForm','copyDaySourceLabel','copyDayDestination','closeCopyDayDialog','cancelCopyDayDialog'
+    'copyDayDialog','copyDayForm','copyDaySourceLabel','copyDayDestination','closeCopyDayDialog','cancelCopyDayDialog',
+    'mealTypesDialog','mealTypeManagerList','newMealTypeButton','closeMealTypesDialog','closeMealTypesDialogFooter',
+    'mealTypeNameDialog','mealTypeNameForm','mealTypeNameDialogTitle','mealTypeNameInput','closeMealTypeNameDialog','cancelMealTypeNameDialog',
+    'copyWeekDialog','copyWeekForm','copyWeekSourceLabel','copyWeekDestinationLabel','copyWeekWarning','closeCopyWeekDialog','cancelCopyWeekDialog'
   ].forEach(id => { els[id] = document.getElementById(id); });
 }
 
@@ -156,6 +162,11 @@ function entriesFor(personId, date, mealTypeId = null) {
 
 function totalsFor(personId, date, mealTypeId = null) {
   return entriesFor(personId, date, mealTypeId).reduce((total, entry) => addTotals(total, nutritionForEntry(entry)), emptyTotals());
+}
+
+function entriesForWeek(personId, weekStart) {
+  const weekEnd = shiftISO(weekStart, 6);
+  return state.entries.filter(entry => entry.personId === personId && entry.date >= weekStart && entry.date <= weekEnd);
 }
 
 function macroCard(label, key, unit, total, target) {
@@ -245,11 +256,16 @@ function renderWeek() {
   if (!state.selectedPersonId) {
     els.mealWeekGrid.innerHTML = '';
     els.mealWeekLabel.textContent = 'Semana';
+    els.copyPreviousWeekButton.disabled = true;
     return;
   }
   const start = mondayISO(state.selectedDate);
   const end = shiftISO(start, 6);
+  const previousStart = shiftISO(start, -7);
+  const previousEntries = entriesForWeek(state.selectedPersonId, previousStart);
   els.mealWeekLabel.textContent = `${parseISO(start).toLocaleDateString('es-ES',{day:'numeric',month:'short'})} – ${parseISO(end).toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'})}`;
+  els.copyPreviousWeekButton.disabled = !previousEntries.length;
+  els.copyPreviousWeekButton.title = previousEntries.length ? `Copiar ${previousEntries.length} alimento${previousEntries.length === 1 ? '' : 's'} de la semana anterior` : 'La semana anterior no tiene alimentos planificados';
   const days = Array.from({ length: 7 }, (_, index) => shiftISO(start, index));
   els.mealWeekGrid.innerHTML = days.map(date => {
     const dayEntries = entriesFor(state.selectedPersonId, date);
@@ -532,6 +548,179 @@ async function copyDay(event) {
   showToast('Día copiado');
 }
 
+function renderMealTypeManager() {
+  if (!els.mealTypeManagerList) return;
+  if (!state.mealTypes.length) {
+    els.mealTypeManagerList.innerHTML = '<div class="meal-library-empty">No hay tipos de comida configurados.</div>';
+    return;
+  }
+  els.mealTypeManagerList.innerHTML = state.mealTypes.map((type, index) => {
+    const usage = state.entries.filter(entry => entry.mealTypeId === type.id).length;
+    return `<article class="meal-type-row" data-meal-type-id="${escapeHTML(type.id)}">
+      <div class="meal-type-info"><strong>${escapeHTML(type.name)}</strong><small>${usage} registro${usage === 1 ? '' : 's'} planificado${usage === 1 ? '' : 's'}</small></div>
+      <div class="meal-type-actions">
+        <button class="secondary-button compact-button meal-type-up" type="button" aria-label="Subir ${escapeHTML(type.name)}" ${index === 0 ? 'disabled' : ''}>↑</button>
+        <button class="secondary-button compact-button meal-type-down" type="button" aria-label="Bajar ${escapeHTML(type.name)}" ${index === state.mealTypes.length - 1 ? 'disabled' : ''}>↓</button>
+        <button class="secondary-button compact-button meal-type-rename" type="button">Renombrar</button>
+        <button class="secondary-button compact-button danger-button meal-type-delete" type="button" ${state.mealTypes.length <= 1 ? 'disabled' : ''}>Eliminar</button>
+      </div>
+    </article>`;
+  }).join('');
+  els.mealTypeManagerList.querySelectorAll('.meal-type-row').forEach(row => {
+    const id = row.dataset.mealTypeId;
+    row.querySelector('.meal-type-up').addEventListener('click', () => moveMealType(id, -1));
+    row.querySelector('.meal-type-down').addEventListener('click', () => moveMealType(id, 1));
+    row.querySelector('.meal-type-rename').addEventListener('click', () => openMealTypeNameDialog(id));
+    row.querySelector('.meal-type-delete').addEventListener('click', () => deleteMealType(id));
+  });
+}
+
+function openMealTypesDialog() {
+  renderMealTypeManager();
+  els.mealTypesDialog.showModal();
+}
+
+function openMealTypeNameDialog(mealTypeId = null) {
+  state.editingMealTypeId = mealTypeId;
+  if (els.mealTypesDialog.open) els.mealTypesDialog.close();
+  const type = mealTypeId ? state.mealTypes.find(item => item.id === mealTypeId) : null;
+  els.mealTypeNameDialogTitle.textContent = type ? 'Renombrar comida' : 'Nueva comida';
+  els.mealTypeNameInput.value = type?.name || '';
+  els.mealTypeNameDialog.showModal();
+  setTimeout(() => els.mealTypeNameInput.focus(), 20);
+}
+
+async function saveMealType(event) {
+  event.preventDefault();
+  const name = els.mealTypeNameInput.value.trim();
+  if (!name) return;
+  const duplicate = state.mealTypes.find(type => type.id !== state.editingMealTypeId && String(type.name || '').trim().toLocaleLowerCase('es') === name.toLocaleLowerCase('es'));
+  if (duplicate) {
+    showToast('Ya existe una comida con ese nombre');
+    return;
+  }
+  const now = Date.now();
+  const previous = state.editingMealTypeId ? state.mealTypes.find(type => type.id === state.editingMealTypeId) : null;
+  const maxOrder = state.mealTypes.reduce((max, type) => Math.max(max, Number(type.order) || 0), 0);
+  const type = {
+    id: previous?.id || makeId(),
+    name,
+    order: previous?.order ?? (maxOrder + 10),
+    createdAt: previous?.createdAt || now,
+    modifiedAt: now,
+    syncVersion: (previous?.syncVersion || 0) + 1,
+  };
+  await nutritionPut('mealTypes', type);
+  state.editingMealTypeId = null;
+  els.mealTypeNameDialog.close();
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  renderMealTypeManager();
+  els.mealTypesDialog.showModal();
+  showToast(previous ? 'Comida renombrada' : 'Comida creada');
+}
+
+async function moveMealType(mealTypeId, direction) {
+  const ordered = [...state.mealTypes];
+  const index = ordered.findIndex(type => type.id === mealTypeId);
+  const targetIndex = index + direction;
+  if (index < 0 || targetIndex < 0 || targetIndex >= ordered.length) return;
+  [ordered[index], ordered[targetIndex]] = [ordered[targetIndex], ordered[index]];
+  const now = Date.now();
+  const updated = ordered.map((type, orderIndex) => ({
+    ...type,
+    order: (orderIndex + 1) * 10,
+    modifiedAt: now,
+    syncVersion: (type.syncVersion || 0) + 1,
+  }));
+  await nutritionPutMany('mealTypes', updated);
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  renderMealTypeManager();
+}
+
+async function deleteMealType(mealTypeId) {
+  const type = state.mealTypes.find(item => item.id === mealTypeId);
+  if (!type) return;
+  if (state.mealTypes.length <= 1) {
+    showToast('Debe existir al menos un tipo de comida');
+    return;
+  }
+  const typeIndex = state.mealTypes.findIndex(item => item.id === mealTypeId);
+  const replacement = state.mealTypes[typeIndex + 1] || state.mealTypes[typeIndex - 1];
+  const usedEntries = state.entries.filter(entry => entry.mealTypeId === mealTypeId);
+  const message = usedEntries.length
+    ? `“${type.name}” se usa en ${usedEntries.length} alimento${usedEntries.length === 1 ? '' : 's'} planificado${usedEntries.length === 1 ? '' : 's'}. Para no perder datos se moverán a “${replacement.name}”. ¿Eliminar esta comida?`
+    : `¿Eliminar el tipo de comida “${type.name}”?`;
+  if (!confirm(message)) return;
+  if (usedEntries.length) {
+    const now = Date.now();
+    await nutritionPutMany('entries', usedEntries.map(entry => ({
+      ...entry,
+      mealTypeId: replacement.id,
+      modifiedAt: now,
+      syncVersion: (entry.syncVersion || 0) + 1,
+    })));
+  }
+  await nutritionRemove('mealTypes', mealTypeId);
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  renderMealTypeManager();
+  showToast(usedEntries.length ? `Comida eliminada · datos movidos a ${replacement.name}` : 'Comida eliminada');
+}
+
+function openCopyPreviousWeekDialog() {
+  if (!state.selectedPersonId) return;
+  const destinationStart = mondayISO(state.selectedDate);
+  const sourceStart = shiftISO(destinationStart, -7);
+  const sourceEntries = entriesForWeek(state.selectedPersonId, sourceStart);
+  if (!sourceEntries.length) {
+    showToast('La semana anterior no tiene alimentos planificados');
+    return;
+  }
+  const destinationEntries = entriesForWeek(state.selectedPersonId, destinationStart);
+  state.copyWeekSourceStart = sourceStart;
+  state.copyWeekDestinationStart = destinationStart;
+  els.copyWeekSourceLabel.textContent = `${formatDateShort(sourceStart)} – ${formatDateShort(shiftISO(sourceStart, 6))}`;
+  els.copyWeekDestinationLabel.textContent = `${formatDateShort(destinationStart)} – ${formatDateShort(shiftISO(destinationStart, 6))}`;
+  els.copyWeekWarning.hidden = !destinationEntries.length;
+  els.copyWeekWarning.textContent = destinationEntries.length
+    ? `La semana de destino ya contiene ${destinationEntries.length} alimento${destinationEntries.length === 1 ? '' : 's'}. Al copiar se sustituirá su planificación completa.`
+    : 'La semana de destino está vacía.';
+  els.copyWeekDialog.showModal();
+}
+
+async function copyPreviousWeek(event) {
+  event.preventDefault();
+  const sourceStart = state.copyWeekSourceStart;
+  const destinationStart = state.copyWeekDestinationStart;
+  if (!sourceStart || !destinationStart || !state.selectedPersonId) return;
+  const sourceEntries = entriesForWeek(state.selectedPersonId, sourceStart);
+  if (!sourceEntries.length) {
+    els.copyWeekDialog.close();
+    showToast('La semana anterior ya no contiene alimentos');
+    return;
+  }
+  const destinationEntries = entriesForWeek(state.selectedPersonId, destinationStart);
+  for (const entry of destinationEntries) await nutritionRemove('entries', entry.id);
+  const now = Date.now();
+  const copies = sourceEntries.map(entry => ({
+    ...entry,
+    id: makeId(),
+    date: shiftISO(entry.date, 7),
+    createdAt: now,
+    modifiedAt: now,
+    syncVersion: 1,
+  }));
+  await nutritionPutMany('entries', copies);
+  els.copyWeekDialog.close();
+  state.copyWeekSourceStart = '';
+  state.copyWeekDestinationStart = '';
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  showToast('Semana anterior copiada');
+}
+
 async function refreshForMealsView() {
   await loadNutritionState({ refreshUsers: true });
   renderAllNutrition();
@@ -550,7 +739,9 @@ function setupEvents() {
   els.mealNextDay.addEventListener('click', () => setSelectedDate(shiftISO(state.selectedDate, 1)));
   els.mealDateInput.addEventListener('change', () => setSelectedDate(els.mealDateInput.value));
   els.mealEditTargetsButton.addEventListener('click', openTargetsDialog);
+  els.manageMealTypesButton.addEventListener('click', openMealTypesDialog);
   els.mealCopyDayButton.addEventListener('click', () => openCopyDayDialog(state.selectedDate));
+  els.copyPreviousWeekButton.addEventListener('click', openCopyPreviousWeekDialog);
   els.newFoodButton.addEventListener('click', () => openFoodDialog());
   els.mealFoodSearch.addEventListener('input', renderFoods);
   els.nutritionChatButton.addEventListener('click', () => showToast('Chat nutricional: próximamente en V11-C'));
@@ -574,6 +765,23 @@ function setupEvents() {
   els.copyDayForm.addEventListener('submit', copyDay);
   els.closeCopyDayDialog.addEventListener('click', () => els.copyDayDialog.close());
   els.cancelCopyDayDialog.addEventListener('click', () => els.copyDayDialog.close());
+
+  els.newMealTypeButton.addEventListener('click', () => openMealTypeNameDialog());
+  els.closeMealTypesDialog.addEventListener('click', () => els.mealTypesDialog.close());
+  els.closeMealTypesDialogFooter.addEventListener('click', () => els.mealTypesDialog.close());
+  els.mealTypeNameForm.addEventListener('submit', saveMealType);
+  const closeMealTypeNameDialog = () => {
+    state.editingMealTypeId = null;
+    els.mealTypeNameDialog.close();
+    renderMealTypeManager();
+    els.mealTypesDialog.showModal();
+  };
+  els.closeMealTypeNameDialog.addEventListener('click', closeMealTypeNameDialog);
+  els.cancelMealTypeNameDialog.addEventListener('click', closeMealTypeNameDialog);
+
+  els.copyWeekForm.addEventListener('submit', copyPreviousWeek);
+  els.closeCopyWeekDialog.addEventListener('click', () => els.copyWeekDialog.close());
+  els.cancelCopyWeekDialog.addEventListener('click', () => els.copyWeekDialog.close());
 
   window.addEventListener('hometasks:core-reset', async () => {
     await resetNutritionDatabase();
