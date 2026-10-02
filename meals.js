@@ -9,7 +9,7 @@ import {
   NUTRITION_DATA_STORES,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '11-C.3';
+const NUTRITION_VERSION = '11-D';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -20,8 +20,9 @@ const LS_DEVICE_ID = 'hometasks-device-id';
 const LS_NUTRITION_SYNC_DIRTY = 'hometasks-nutrition-sync-dirty';
 const LS_NUTRITION_SYNC_REVISION = 'hometasks-nutrition-sync-revision';
 const LS_NUTRITION_LAST_SYNC = 'hometasks-nutrition-sync-last';
-const CHAT_HISTORY_LIMIT = 8;
-const CHAT_LIBRARY_LIMIT = 50;
+const ASSISTANT_ENGINE = 'local-v1';
+const ASSISTANT_MAX_FOODS = 14;
+const ASSISTANT_MAX_ITEMS_PER_MEAL = 3;
 const DEFAULT_MEAL_TYPES = [
   { id: 'breakfast', name: 'Desayuno', order: 10, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
   { id: 'lunch', name: 'Comida', order: 20, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
@@ -1006,29 +1007,11 @@ function chatJsonpRequest(action, params = {}, timeoutMs = 25000) {
   });
 }
 
-async function chatPost(payload, timeoutMs = 130000) {
-  const { endpoint, houseKey } = chatBackendConfig();
-  if (!endpoint || !houseKey) throw new Error('Configura primero Apps Script en Ajustes.');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    await fetch(endpoint, {
-      method: 'POST', mode: 'no-cors', cache: 'no-store', redirect: 'follow', credentials: 'omit',
-      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-      body: JSON.stringify({ ...payload, key: houseKey, clientVersion: NUTRITION_VERSION }),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') throw new Error('Gemini está tardando demasiado en responder.');
-    throw new Error('No se ha podido enviar la consulta a Apps Script.');
-  } finally { clearTimeout(timer); }
-}
-
-function setChatStatus(kind, text, model = '') {
+function setChatStatus(kind, text, detail = '') {
   if (!els.nutritionChatStatus) return;
   els.nutritionChatStatus.className = `nutrition-chat-status ${kind}`;
   els.nutritionChatStatus.textContent = text;
-  els.nutritionChatModel.textContent = model ? `Modelo: ${model}` : '';
+  els.nutritionChatModel.textContent = detail || '';
 }
 
 function chatMessagesForPerson(personId = state.selectedPersonId) {
@@ -1037,48 +1020,466 @@ function chatMessagesForPerson(personId = state.selectedPersonId) {
     .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
 }
 
-function buildChatContext(message = '') {
-  const user = state.users.find(item => item.id === state.selectedPersonId);
+function normalizeAssistantText(value = '') {
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function configuredNutritionTarget() {
   const target = currentTarget();
-  const totals = totalsFor(state.selectedPersonId, state.selectedDate);
-  const meals = state.mealTypes.map(type => ({
-    name: type.name,
-    totals: totalsFor(state.selectedPersonId, state.selectedDate, type.id),
-    foods: entriesFor(state.selectedPersonId, state.selectedDate, type.id).map(entry => {
-      const food = foodForEntry(entry);
-      return { name: food?.name || 'Alimento eliminado', grams: safeNumber(entry.quantityGrams), values: nutritionForEntry(entry) };
-    }),
-  })).filter(meal => meal.foods.length);
-  const weekStart = mondayISO(state.selectedDate);
-  const week = Array.from({ length: 7 }, (_, index) => {
-    const date = shiftISO(weekStart, index);
-    return { date, totals: totalsFor(state.selectedPersonId, date), plannedFoods: entriesFor(state.selectedPersonId, date).length };
-  });
-  const needsLibrary = /(alimento|comida|cena|desayuno|merienda|almuerzo|receta|ingrediente|biblioteca|qué comer|que comer|qué puedo comer|que puedo comer|suger|recom|propon|idea de menú|idea de menu|menú|menu|tengo en casa)/i.test(String(message || '').toLowerCase());
-  const library = needsLibrary ? state.foods.slice(0, CHAT_LIBRARY_LIMIT).map(food => ({
-    name: food.name, kcal: safeNumber(food.kcal), protein: safeNumber(food.protein), carbs: safeNumber(food.carbs), fat: safeNumber(food.fat), fiber: safeNumber(food.fiber), source: food.source || 'Manual',
-  })) : [];
-  return {
-    person: { id: state.selectedPersonId, name: user?.name || 'Persona seleccionada' },
-    selectedDate: state.selectedDate,
-    targets: target ? { kcal: safeNumber(target.kcal), protein: safeNumber(target.protein), carbs: safeNumber(target.carbs), fat: safeNumber(target.fat), fiber: safeNumber(target.fiber) } : null,
-    dayTotals: totals,
-    meals,
-    weekStart,
-    week,
-    ...(needsLibrary ? { foodLibrary: library, foodLibraryTruncated: state.foods.length > CHAT_LIBRARY_LIMIT } : { foodLibraryOmitted: true }),
+  if (!target) return null;
+  const normalized = {
+    kcal: safeNumber(target.kcal),
+    protein: safeNumber(target.protein),
+    carbs: safeNumber(target.carbs),
+    fat: safeNumber(target.fat),
+    fiber: safeNumber(target.fiber),
   };
+  return (normalized.kcal || normalized.protein || normalized.carbs || normalized.fat) ? normalized : null;
+}
+
+function remainingGoals(target, totals) {
+  return {
+    kcal: Math.max(0, safeNumber(target?.kcal) - safeNumber(totals?.kcal)),
+    protein: Math.max(0, safeNumber(target?.protein) - safeNumber(totals?.protein)),
+    carbs: Math.max(0, safeNumber(target?.carbs) - safeNumber(totals?.carbs)),
+    fat: Math.max(0, safeNumber(target?.fat) - safeNumber(totals?.fat)),
+    fiber: Math.max(0, safeNumber(target?.fiber) - safeNumber(totals?.fiber)),
+  };
+}
+
+function scaleGoals(goals, factor) {
+  return {
+    kcal: safeNumber(goals?.kcal) * factor,
+    protein: safeNumber(goals?.protein) * factor,
+    carbs: safeNumber(goals?.carbs) * factor,
+    fat: safeNumber(goals?.fat) * factor,
+    fiber: safeNumber(goals?.fiber) * factor,
+  };
+}
+
+function subtractGoals(goals, used) {
+  return {
+    kcal: Math.max(0, safeNumber(goals?.kcal) - safeNumber(used?.kcal)),
+    protein: Math.max(0, safeNumber(goals?.protein) - safeNumber(used?.protein)),
+    carbs: Math.max(0, safeNumber(goals?.carbs) - safeNumber(used?.carbs)),
+    fat: Math.max(0, safeNumber(goals?.fat) - safeNumber(used?.fat)),
+    fiber: Math.max(0, safeNumber(goals?.fiber) - safeNumber(used?.fiber)),
+  };
+}
+
+function addTotalsCopy(a, b) {
+  return {
+    kcal: safeNumber(a?.kcal) + safeNumber(b?.kcal),
+    protein: safeNumber(a?.protein) + safeNumber(b?.protein),
+    carbs: safeNumber(a?.carbs) + safeNumber(b?.carbs),
+    fat: safeNumber(a?.fat) + safeNumber(b?.fat),
+    fiber: safeNumber(a?.fiber) + safeNumber(b?.fiber),
+  };
+}
+
+function hasMeaningfulRemaining(goals) {
+  return safeNumber(goals?.kcal) > 15 || safeNumber(goals?.protein) > 1 || safeNumber(goals?.carbs) > 2 || safeNumber(goals?.fat) > 1;
+}
+
+function foodContribution(food, grams) {
+  const factor = safeNumber(grams) / 100;
+  return {
+    kcal: safeNumber(food?.kcal) * factor,
+    protein: safeNumber(food?.protein) * factor,
+    carbs: safeNumber(food?.carbs) * factor,
+    fat: safeNumber(food?.fat) * factor,
+    fiber: safeNumber(food?.fiber) * factor,
+  };
+}
+
+function assistantFoodLimits(food) {
+  const kcal = safeNumber(food?.kcal);
+  const fat = safeNumber(food?.fat);
+  if (kcal >= 500 || fat >= 45) return { min: 5, max: 60, step: 5 };
+  if (kcal >= 350 || fat >= 25) return { min: 10, max: 100, step: 5 };
+  if (kcal >= 220) return { min: 20, max: 160, step: 5 };
+  if (kcal >= 120) return { min: 25, max: 220, step: 5 };
+  return { min: 30, max: 300, step: 5 };
+}
+
+function assistantPlanScore(totals, target, foodCount = 0) {
+  const specs = [
+    ['kcal', 250, 1.0],
+    ['protein', 25, 1.45],
+    ['carbs', 30, 1.0],
+    ['fat', 12, 1.15],
+  ];
+  let score = 0;
+  for (const [key, floor, weight] of specs) {
+    const goal = safeNumber(target?.[key]);
+    const value = safeNumber(totals?.[key]);
+    const denominator = Math.max(goal, floor);
+    const difference = value - goal;
+    const normalized = Math.abs(difference) / denominator;
+    const overshootPenalty = difference > 0 ? 1.55 : 1;
+    score += weight * normalized * normalized * overshootPenalty;
+  }
+  return score + Math.max(0, foodCount - 1) * 0.018;
+}
+
+function totalsForAssistantSelection(selection) {
+  let totals = emptyTotals();
+  for (const item of selection) totals = addTotalsCopy(totals, foodContribution(item.food, item.grams));
+  return totals;
+}
+
+function bestSingleFoodOption(food, target) {
+  const limits = assistantFoodLimits(food);
+  let best = null;
+  for (let grams = limits.min; grams <= limits.max; grams += limits.step) {
+    const totals = foodContribution(food, grams);
+    const score = assistantPlanScore(totals, target, 1);
+    if (!best || score < best.score) best = { food, grams, score, limits };
+  }
+  return best;
+}
+
+function optimizeFoodCombination(target) {
+  const validFoods = state.foods.filter(food =>
+    safeNumber(food.kcal) + safeNumber(food.protein) + safeNumber(food.carbs) + safeNumber(food.fat) > 0
+  );
+  if (!validFoods.length || !hasMeaningfulRemaining(target)) return { items: [], totals: emptyTotals(), score: Infinity };
+
+  const candidates = validFoods
+    .map(food => bestSingleFoodOption(food, target))
+    .filter(Boolean)
+    .sort((a, b) => a.score - b.score)
+    .slice(0, ASSISTANT_MAX_FOODS);
+
+  const selected = new Map();
+  let totals = emptyTotals();
+  let currentScore = assistantPlanScore(totals, target, 0);
+
+  for (let iteration = 0; iteration < 180; iteration++) {
+    let bestMove = null;
+    for (const candidate of candidates) {
+      const currentGrams = selected.get(candidate.food.id) || 0;
+      const isNew = currentGrams === 0;
+      if (isNew && selected.size >= ASSISTANT_MAX_ITEMS_PER_MEAL) continue;
+      const addGrams = isNew ? candidate.limits.min : candidate.limits.step;
+      if (currentGrams + addGrams > candidate.limits.max) continue;
+      const testTotals = addTotalsCopy(totals, foodContribution(candidate.food, addGrams));
+      const testCount = selected.size + (isNew ? 1 : 0);
+      const score = assistantPlanScore(testTotals, target, testCount);
+      if (!bestMove || score < bestMove.score) bestMove = { candidate, addGrams, score, totals: testTotals };
+    }
+    if (!bestMove || bestMove.score >= currentScore - 0.00015) break;
+    const id = bestMove.candidate.food.id;
+    selected.set(id, (selected.get(id) || 0) + bestMove.addGrams);
+    totals = bestMove.totals;
+    currentScore = bestMove.score;
+    if (currentScore < 0.004) break;
+  }
+
+  if (!selected.size && candidates[0]) selected.set(candidates[0].food.id, candidates[0].grams);
+
+  let selection = [...selected.entries()].map(([foodId, grams]) => ({
+    food: validFoods.find(food => food.id === foodId),
+    grams,
+  })).filter(item => item.food && item.grams > 0);
+
+  // Pequeño refinado local de cantidades. Mantiene el coste bajo en tablets antiguas.
+  for (let pass = 0; pass < 5 && selection.length; pass++) {
+    let improved = false;
+    let bestSelection = selection;
+    let bestTotals = totalsForAssistantSelection(selection);
+    let bestScore = assistantPlanScore(bestTotals, target, selection.length);
+    for (let i = 0; i < selection.length; i++) {
+      const item = selection[i];
+      const limits = assistantFoodLimits(item.food);
+      for (const direction of [-1, 1]) {
+        const nextGrams = item.grams + limits.step * direction;
+        if (nextGrams < limits.min || nextGrams > limits.max) continue;
+        const test = selection.map((entry, index) => index === i ? { ...entry, grams: nextGrams } : entry);
+        const testTotals = totalsForAssistantSelection(test);
+        const score = assistantPlanScore(testTotals, target, test.length);
+        if (score < bestScore - 0.0001) {
+          bestSelection = test;
+          bestTotals = testTotals;
+          bestScore = score;
+          improved = true;
+        }
+      }
+    }
+    selection = bestSelection;
+    totals = bestTotals;
+    currentScore = bestScore;
+    if (!improved) break;
+  }
+
+  return {
+    items: selection.map(item => ({
+      foodId: item.food.id,
+      foodName: item.food.name,
+      grams: Math.round(item.grams / 5) * 5,
+      foodSnapshot: {
+        id: item.food.id,
+        name: item.food.name,
+        kcal: safeNumber(item.food.kcal),
+        protein: safeNumber(item.food.protein),
+        carbs: safeNumber(item.food.carbs),
+        fat: safeNumber(item.food.fat),
+        fiber: safeNumber(item.food.fiber),
+        source: item.food.source || 'Manual',
+      },
+    })),
+    totals,
+    score: currentScore,
+  };
+}
+
+function macroStatusLine(label, key, totals, target, unit = 'g') {
+  const value = safeNumber(totals?.[key]);
+  const goal = safeNumber(target?.[key]);
+  const digits = key === 'kcal' ? 0 : 1;
+  const suffix = key === 'kcal' ? 'kcal' : unit;
+  if (goal <= 0) return `${label}: ${formatNumber(value, digits)} ${suffix} · sin objetivo configurado`;
+  const delta = goal - value;
+  if (Math.abs(delta) < (key === 'kcal' ? 5 : 0.5)) return `${label}: ${formatNumber(value, digits)} / ${formatNumber(goal, digits)} ${suffix} · objetivo prácticamente alcanzado`;
+  if (delta > 0) return `${label}: ${formatNumber(value, digits)} / ${formatNumber(goal, digits)} ${suffix} · faltan ${formatNumber(delta, digits)} ${suffix}`;
+  return `${label}: ${formatNumber(value, digits)} / ${formatNumber(goal, digits)} ${suffix} · ${formatNumber(Math.abs(delta), digits)} ${suffix} por encima`;
+}
+
+function dayAnalysisText() {
+  const target = configuredNutritionTarget();
+  if (!target) return 'Configura primero tus objetivos de calorías, proteínas, carbohidratos y grasas. El asistente local usa exactamente esos valores y no calcula objetivos por su cuenta.';
+  const totals = totalsFor(state.selectedPersonId, state.selectedDate);
+  const lines = [
+    macroStatusLine('Calorías', 'kcal', totals, target),
+    macroStatusLine('Proteínas', 'protein', totals, target),
+    macroStatusLine('Carbohidratos', 'carbs', totals, target),
+    macroStatusLine('Grasas', 'fat', totals, target),
+  ];
+  const tracked = [
+    { label: 'calorías', key: 'kcal' }, { label: 'proteína', key: 'protein' },
+    { label: 'carbohidratos', key: 'carbs' }, { label: 'grasas', key: 'fat' },
+  ].filter(item => safeNumber(target[item.key]) > 0)
+    .map(item => ({ ...item, deviation: Math.abs(safeNumber(totals[item.key]) - safeNumber(target[item.key])) / safeNumber(target[item.key]) }))
+    .sort((a, b) => b.deviation - a.deviation);
+  const count = entriesFor(state.selectedPersonId, state.selectedDate).length;
+  const note = count ? `Hay ${count} alimento${count === 1 ? '' : 's'} registrado${count === 1 ? '' : 's'} en el día.` : 'Todavía no hay alimentos registrados en este día.';
+  const focus = tracked[0] ? `La mayor desviación proporcional ahora mismo está en ${tracked[0].label}.` : '';
+  return `Resumen de ${formatDateLong(state.selectedDate)}\n\n${lines.join('\n')}\n\n${note}${focus ? ` ${focus}` : ''}`;
+}
+
+function missingGoalsText() {
+  const target = configuredNutritionTarget();
+  if (!target) return 'No puedo calcular lo que falta hasta que configures tus objetivos diarios.';
+  const totals = totalsFor(state.selectedPersonId, state.selectedDate);
+  const remaining = remainingGoals(target, totals);
+  const over = {
+    kcal: Math.max(0, totals.kcal - target.kcal), protein: Math.max(0, totals.protein - target.protein),
+    carbs: Math.max(0, totals.carbs - target.carbs), fat: Math.max(0, totals.fat - target.fat),
+  };
+  const lines = [
+    `Calorías: ${remaining.kcal > 5 ? `faltan ${formatNumber(remaining.kcal,0)} kcal` : over.kcal > 5 ? `${formatNumber(over.kcal,0)} kcal por encima` : 'objetivo alcanzado'}`,
+    `Proteínas: ${remaining.protein > .5 ? `faltan ${formatNumber(remaining.protein,1)} g` : over.protein > .5 ? `${formatNumber(over.protein,1)} g por encima` : 'objetivo alcanzado'}`,
+    `Carbohidratos: ${remaining.carbs > 1 ? `faltan ${formatNumber(remaining.carbs,1)} g` : over.carbs > 1 ? `${formatNumber(over.carbs,1)} g por encima` : 'objetivo alcanzado'}`,
+    `Grasas: ${remaining.fat > .5 ? `faltan ${formatNumber(remaining.fat,1)} g` : over.fat > .5 ? `${formatNumber(over.fat,1)} g por encima` : 'objetivo alcanzado'}`,
+  ];
+  return `Para llegar a tus objetivos de ${formatDateLong(state.selectedDate)}:\n\n${lines.join('\n')}`;
+}
+
+function requestedMealType(text) {
+  const normalized = normalizeAssistantText(text);
+  if (/(proxima comida|siguiente comida|que puedo comer)/.test(normalized)) return null;
+  return state.mealTypes.find(type => {
+    const name = normalizeAssistantText(type.name);
+    return name.length >= 4 && new RegExp(`(^|\\b)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|$)`).test(normalized);
+  }) || null;
+}
+
+function planTotalsFromItems(items) {
+  return items.reduce((totals, item) => addTotalsCopy(totals, foodContribution(item.foodSnapshot, item.grams)), emptyTotals());
+}
+
+function planText(title, items, baseTotals, target, intro = '') {
+  if (!items.length) return `${intro ? `${intro}\n\n` : ''}No he encontrado una combinación útil con los alimentos actuales de tu biblioteca. Añade algunos alimentos con sus macros o amplía la biblioteca.`;
+  const grouped = new Map();
+  for (const item of items) {
+    if (!grouped.has(item.mealTypeId)) grouped.set(item.mealTypeId, []);
+    grouped.get(item.mealTypeId).push(item);
+  }
+  const sections = [];
+  for (const [mealTypeId, group] of grouped.entries()) {
+    const type = state.mealTypes.find(item => item.id === mealTypeId);
+    const subtotal = planTotalsFromItems(group);
+    sections.push(`${type?.name || 'Comida'}\n${group.map(item => `- ${item.foodName}: ${formatNumber(item.grams,0)} g`).join('\n')}\n≈ ${formatNumber(subtotal.kcal,0)} kcal · P ${formatNumber(subtotal.protein,1)} · C ${formatNumber(subtotal.carbs,1)} · G ${formatNumber(subtotal.fat,1)}`);
+  }
+  const proposed = planTotalsFromItems(items);
+  const after = addTotalsCopy(baseTotals, proposed);
+  const afterLines = [
+    `Calorías ${formatNumber(after.kcal,0)} / ${formatNumber(target.kcal,0)} kcal`,
+    `P ${formatNumber(after.protein,1)} / ${formatNumber(target.protein,1)} g`,
+    `C ${formatNumber(after.carbs,1)} / ${formatNumber(target.carbs,1)} g`,
+    `G ${formatNumber(after.fat,1)} / ${formatNumber(target.fat,1)} g`,
+  ];
+  return `${intro ? `${intro}\n\n` : ''}${title}\n\n${sections.join('\n\n')}\n\nSi añades la propuesta, el día quedaría aproximadamente en:\n${afterLines.join(' · ')}\n\nLas cantidades están redondeadas a 5 g y se calculan únicamente con los valores de tu biblioteca.`;
+}
+
+function buildRestOfDayPlan({ fullDay = false } = {}) {
+  const target = configuredNutritionTarget();
+  if (!target) return { text: 'Configura primero los objetivos diarios para que pueda construir un plan.' };
+  if (!state.foods.length) return { text: 'La biblioteca de alimentos está vacía. Añade alimentos con sus valores nutricionales antes de generar un plan.' };
+  const baseTotals = totalsFor(state.selectedPersonId, state.selectedDate);
+  let remaining = remainingGoals(target, baseTotals);
+  if (!hasMeaningfulRemaining(remaining)) return { text: 'Tus objetivos principales ya están prácticamente cubiertos para este día. No hace falta añadir una planificación automática.' };
+
+  const dayEntries = entriesFor(state.selectedPersonId, state.selectedDate);
+  let slots;
+  let intro = '';
+  if (fullDay && !dayEntries.length) {
+    slots = [...state.mealTypes];
+    intro = 'He repartido el objetivo del día entre tus comidas configuradas.';
+  } else {
+    slots = state.mealTypes.filter(type => !entriesFor(state.selectedPersonId, state.selectedDate, type.id).length);
+    if (!slots.length) slots = state.mealTypes.length ? [state.mealTypes[state.mealTypes.length - 1]] : [];
+    intro = dayEntries.length
+      ? 'Mantengo todo lo que ya has registrado y planifico únicamente lo que falta.'
+      : 'Como el día está vacío, uso tus comidas configuradas para repartir el objetivo.';
+  }
+  if (!slots.length) return { text: 'No hay tipos de comida configurados. Crea al menos uno para generar un plan.' };
+
+  const planItems = [];
+  for (let index = 0; index < slots.length && hasMeaningfulRemaining(remaining); index++) {
+    const type = slots[index];
+    const divisor = Math.max(1, slots.length - index);
+    const desired = scaleGoals(remaining, 1 / divisor);
+    const proposal = optimizeFoodCombination(desired);
+    for (const item of proposal.items) planItems.push({ ...item, mealTypeId: type.id });
+    remaining = subtractGoals(remaining, proposal.totals);
+  }
+  return {
+    text: planText(fullDay ? 'Plan propuesto para el día' : 'Plan propuesto para completar el día', planItems, baseTotals, target, intro),
+    plan: planItems.length ? { date: state.selectedDate, title: fullDay ? 'Plan del día' : 'Completar el día', items: planItems, totals: planTotalsFromItems(planItems) } : null,
+  };
+}
+
+function buildNextMealPlan(text) {
+  const target = configuredNutritionTarget();
+  if (!target) return { text: 'Configura primero tus objetivos diarios para que pueda proponerte una comida.' };
+  if (!state.foods.length) return { text: 'Necesito alimentos en tu biblioteca para proponer una comida.' };
+  const baseTotals = totalsFor(state.selectedPersonId, state.selectedDate);
+  const remaining = remainingGoals(target, baseTotals);
+  if (!hasMeaningfulRemaining(remaining)) return { text: 'Tus objetivos principales ya están prácticamente cubiertos. No veo necesario añadir otra comida para alcanzarlos.' };
+
+  const explicit = requestedMealType(text);
+  const emptyTypes = state.mealTypes.filter(type => !entriesFor(state.selectedPersonId, state.selectedDate, type.id).length);
+  const chosen = explicit || emptyTypes[0] || state.mealTypes[state.mealTypes.length - 1];
+  if (!chosen) return { text: 'No hay tipos de comida configurados.' };
+  const chosenOrder = Number(chosen.order ?? 999);
+  const laterEmpty = emptyTypes.filter(type => Number(type.order ?? 999) >= chosenOrder);
+  const divisor = Math.max(1, explicit ? laterEmpty.length || 1 : emptyTypes.length || 1);
+  const desired = scaleGoals(remaining, 1 / divisor);
+  const proposal = optimizeFoodCombination(desired);
+  const items = proposal.items.map(item => ({ ...item, mealTypeId: chosen.id }));
+  return {
+    text: planText(`Propuesta para ${chosen.name}`, items, baseTotals, target, divisor > 1 ? `He reservado parte de lo que falta para las ${divisor - 1} comida${divisor - 1 === 1 ? '' : 's'} posterior${divisor - 1 === 1 ? '' : 'es'}.` : 'Esta propuesta intenta cubrir la mayor parte de lo que queda hoy.'),
+    plan: items.length ? { date: state.selectedDate, title: chosen.name, items, totals: planTotalsFromItems(items) } : null,
+  };
+}
+
+function weeklyReviewText() {
+  const target = configuredNutritionTarget();
+  const start = mondayISO(state.selectedDate);
+  const days = Array.from({ length: 7 }, (_, index) => shiftISO(start, index));
+  const withData = days.filter(date => entriesFor(state.selectedPersonId, date).length);
+  if (!withData.length) return `No hay alimentos registrados en la semana del ${formatDateShort(start)} al ${formatDateShort(shiftISO(start,6))}.`;
+  const aggregate = withData.reduce((sum, date) => addTotalsCopy(sum, totalsFor(state.selectedPersonId, date)), emptyTotals());
+  const average = scaleGoals(aggregate, 1 / withData.length);
+  const lines = [
+    `Días con datos: ${withData.length} de 7`,
+    `Media: ${formatNumber(average.kcal,0)} kcal · P ${formatNumber(average.protein,1)} g · C ${formatNumber(average.carbs,1)} g · G ${formatNumber(average.fat,1)} g`,
+  ];
+  if (target) {
+    const overKcal = withData.filter(date => totalsFor(state.selectedPersonId, date).kcal > target.kcal).length;
+    const underProtein = withData.filter(date => totalsFor(state.selectedPersonId, date).protein + .5 < target.protein).length;
+    lines.push(`Calorías por encima del objetivo: ${overKcal} día${overKcal === 1 ? '' : 's'}.`);
+    lines.push(`Proteína por debajo del objetivo: ${underProtein} día${underProtein === 1 ? '' : 's'}.`);
+  } else {
+    lines.push('No hay objetivos configurados, así que muestro medias sin compararlas con una meta.');
+  }
+  return `Resumen semanal\n\n${lines.join('\n')}`;
+}
+
+function findFoodByAssistantName(query) {
+  const normalized = normalizeAssistantText(query).replace(/[?.!,;:]+$/g, '').trim();
+  if (!normalized) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const food of state.foods) {
+    const name = normalizeAssistantText(food.name);
+    if (name === normalized) return food;
+    let score = 0;
+    if (name.includes(normalized) || normalized.includes(name)) score += 10;
+    const tokens = normalized.split(' ').filter(token => token.length > 2);
+    for (const token of tokens) if (name.includes(token)) score += 1;
+    if (score > bestScore) { best = food; bestScore = score; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+function simulationText(text) {
+  const normalized = normalizeAssistantText(text);
+  const match = normalized.match(/(\d+(?:[.,]\d+)?)\s*(?:g|gr|gramos?)\s+(?:de\s+)?(.+)$/i);
+  if (!match) return null;
+  const grams = safeNumber(match[1].replace(',', '.'));
+  const food = findFoodByAssistantName(match[2]);
+  if (!grams || !food) return food ? null : `No encuentro “${match[2].trim()}” en tu biblioteca de alimentos.`;
+  const values = foodContribution(food, grams);
+  const before = totalsFor(state.selectedPersonId, state.selectedDate);
+  const after = addTotalsCopy(before, values);
+  const target = configuredNutritionTarget();
+  let answer = `${formatNumber(grams,0)} g de ${food.name} añadirían aproximadamente ${formatNumber(values.kcal,0)} kcal · P ${formatNumber(values.protein,1)} g · C ${formatNumber(values.carbs,1)} g · G ${formatNumber(values.fat,1)} g.\n\nEl total del día pasaría a ${formatNumber(after.kcal,0)} kcal · P ${formatNumber(after.protein,1)} · C ${formatNumber(after.carbs,1)} · G ${formatNumber(after.fat,1)}.`;
+  if (target) answer += `\n\n${macroStatusLine('Calorías', 'kcal', after, target)}\n${macroStatusLine('Proteínas', 'protein', after, target)}\n${macroStatusLine('Carbohidratos', 'carbs', after, target)}\n${macroStatusLine('Grasas', 'fat', after, target)}`;
+  return answer;
+}
+
+function localAssistantAnswer(text) {
+  const normalized = normalizeAssistantText(text);
+  const simulation = /(que pasa si|simula|si anado|si añado|si agrego)/.test(normalized) ? simulationText(text) : null;
+  if (simulation) return { text: simulation };
+  if (/(planifica.*resto|resto.*dia|completa.*dia|ajusta.*resto)/.test(normalized)) return buildRestOfDayPlan({ fullDay: false });
+  if (/(plan completo|plan.*dia|hazme.*plan|planifica.*dia)/.test(normalized)) return buildRestOfDayPlan({ fullDay: true });
+  if (/(semana|semanal)/.test(normalized)) return { text: weeklyReviewText() };
+  if (/(sugiere|sugerir|propon|proxima comida|próxima comida|que puedo comer|qué puedo comer|cena|desayuno|merienda)/.test(normalized)) return buildNextMealPlan(text);
+  if (/(que me falta|qué me falta|cuanto me falta|cuánto me falta|restante|restantes)/.test(normalized)) return { text: missingGoalsText() };
+  if (/(como voy|cómo voy|analiza|analisis|análisis|balance|resumen.*dia|estado.*dia)/.test(normalized)) return { text: dayAnalysisText() };
+  if (/^(ayuda|help|que puedes hacer|qué puedes hacer)/.test(normalized)) return { text: assistantHelpText() };
+  return { text: `No necesito Internet, pero tampoco interpreto preguntas abiertas como una IA. Puedo ayudarte con comandos concretos:\n\n- “Cómo voy hoy”\n- “Qué me falta”\n- “Hazme un plan del día”\n- “Planifica el resto del día”\n- “Sugiere una cena”\n- “Revisa mi semana”\n- “Qué pasa si añado 150 g de [alimento]”\n\nTambién puedes usar los botones rápidos de abajo.` };
+}
+
+function assistantHelpText() {
+  return 'El asistente local usa únicamente tus objetivos, tu menú y los alimentos guardados. Puede analizar el día, calcular lo que falta, proponer una comida, planificar el resto del día, construir un plan completo cuando el día está vacío, revisar la semana y simular cantidades. No calcula cuáles deberían ser tus objetivos ni usa servicios externos.';
 }
 
 function renderChatMessages() {
   if (!els.nutritionChatMessages) return;
   const messages = chatMessagesForPerson();
   if (!messages.length) {
-    els.nutritionChatMessages.innerHTML = `<div class="nutrition-chat-welcome"><strong>Gemini puede leer el contexto de Comidas.</strong><span>Pregúntale por el menú del ${escapeHTML(formatDateLong(state.selectedDate))}, tus objetivos, la semana o los alimentos guardados. No modificará datos automáticamente.</span></div>`;
+    els.nutritionChatMessages.innerHTML = `<div class="nutrition-chat-welcome"><strong>Asistente nutricional local</strong><span>Funciona sin Internet y utiliza solo tus objetivos, tu menú y la biblioteca de alimentos. Prueba “Hazme un plan del día” o usa los botones rápidos.</span></div>`;
   } else {
-    els.nutritionChatMessages.innerHTML = messages.map(message => `<div class="nutrition-chat-message ${message.role}"><div>${escapeHTML(message.text).replace(/\n/g, '<br>')}</div><small>${new Date(message.createdAt).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</small></div>`).join('');
+    els.nutritionChatMessages.innerHTML = messages.map(message => {
+      const planAction = message.role === 'assistant' && message.plan?.items?.length
+        ? `<div class="assistant-plan-actions">${message.planAppliedAt
+          ? '<span class="assistant-plan-applied">✓ Propuesta añadida al menú</span>'
+          : `<button class="primary-button compact-button assistant-plan-apply" type="button" data-assistant-plan-id="${escapeHTML(message.id)}">Añadir propuesta al menú</button>`}</div>`
+        : '';
+      return `<div class="nutrition-chat-message ${message.role}"><div>${escapeHTML(message.text).replace(/\n/g, '<br>')}</div>${planAction}<small>${new Date(message.createdAt).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</small></div>`;
+    }).join('');
   }
-  if (state.chatBusy) els.nutritionChatMessages.insertAdjacentHTML('beforeend', '<div class="nutrition-chat-message assistant pending">Gemini está preparando la respuesta…</div>');
+  if (state.chatBusy) els.nutritionChatMessages.insertAdjacentHTML('beforeend', '<div class="nutrition-chat-message assistant pending">Calculando con tus datos…</div>');
+  els.nutritionChatMessages.querySelectorAll('[data-assistant-plan-id]').forEach(button => button.addEventListener('click', () => applyAssistantPlan(button.dataset.assistantPlanId).catch(console.error)));
   els.nutritionChatMessages.scrollTop = els.nutritionChatMessages.scrollHeight;
   els.clearNutritionChat.disabled = !messages.length || state.chatBusy;
 }
@@ -1089,49 +1490,15 @@ function renderChatContextLabel() {
 }
 
 async function refreshChatBackendStatus() {
-  const config = chatBackendConfig();
-  if (!navigator.onLine) {
-    state.chatBackendReady = false;
-    setChatStatus('error', 'Sin conexión');
-    els.nutritionChatSetup.hidden = false;
-    els.nutritionChatSetupText.textContent = 'El historial local está disponible, pero Gemini necesita conexión a Internet.';
-    return false;
-  }
-  if (!config.endpoint || !config.houseKey) {
-    state.chatBackendReady = false;
-    setChatStatus('error', 'Apps Script sin configurar');
-    els.nutritionChatSetup.hidden = false;
-    els.nutritionChatSetupText.textContent = 'Configura la URL /exec y la clave de la casa en Ajustes. V11-C.3 usa ese mismo backend como proxy seguro.';
-    return false;
-  }
-  setChatStatus('checking', 'Comprobando Gemini…');
-  try {
-    const result = await chatJsonpRequest('nutrition_ai_status', {}, 18000);
-    state.chatBackendReady = Boolean(result.ok && result.configured);
-    state.chatBackendModel = result.model || '';
-    if (state.chatBackendReady) {
-      setChatStatus('ready', 'Gemini conectado', state.chatBackendModel);
-      els.nutritionChatSetup.hidden = true;
-      return true;
-    }
-    const message = result.error === 'unauthorized'
-      ? 'La clave de la casa no coincide con el Apps Script desplegado.'
-      : 'Añade GEMINI_API_KEY en Propiedades de script del proyecto Apps Script y vuelve a desplegar V11-C.3.';
-    setChatStatus('error', 'Gemini sin configurar');
-    els.nutritionChatSetup.hidden = false;
-    els.nutritionChatSetupText.textContent = message;
-    return false;
-  } catch (error) {
-    state.chatBackendReady = false;
-    setChatStatus('error', 'Backend no disponible');
-    els.nutritionChatSetup.hidden = false;
-    els.nutritionChatSetupText.textContent = error?.message || 'No se ha podido comprobar el backend.';
-    return false;
-  }
+  state.chatBackendReady = true;
+  state.chatBackendModel = ASSISTANT_ENGINE;
+  setChatStatus('ready', 'Asistente local disponible', 'Sin API · funciona offline');
+  if (els.nutritionChatSetup) els.nutritionChatSetup.hidden = true;
+  return true;
 }
 
 async function openNutritionChat() {
-  if (!state.selectedPersonId) return showToast('Añade o selecciona una persona antes de abrir el chat');
+  if (!state.selectedPersonId) return showToast('Añade o selecciona una persona antes de abrir el asistente');
   renderChatContextLabel();
   renderChatMessages();
   els.nutritionChatInput.value = '';
@@ -1140,29 +1507,12 @@ async function openNutritionChat() {
   await refreshChatBackendStatus();
 }
 
-async function pollChatResult(requestId) {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const result = await chatJsonpRequest('nutrition_chat_result', { requestId }, 22000);
-    if (result?.status === 'pending') {
-      await new Promise(resolve => setTimeout(resolve, 900 + attempt * 120));
-      continue;
-    }
-    if (!result?.ok) throw new Error(result?.message || 'Gemini no ha podido responder.');
-    if (!result?.text) throw new Error('Gemini ha devuelto una respuesta vacía.');
-    return result;
-  }
-  throw new Error('No se ha recibido la respuesta de Gemini dentro del tiempo esperado.');
-}
-
 async function sendNutritionChat(event) {
   event.preventDefault();
   if (state.chatBusy || !state.selectedPersonId) return;
   const text = String(els.nutritionChatInput.value || '').trim();
   if (!text) return;
-  if (!navigator.onLine) return showToast('Gemini necesita conexión a Internet');
-  if (!state.chatBackendReady && !(await refreshChatBackendStatus())) return;
 
-  const previous = chatMessagesForPerson().slice(-CHAT_HISTORY_LIMIT).map(item => ({ role: item.role, text: item.text }));
   const now = Date.now();
   const userMessage = { id: makeId(), personId: state.selectedPersonId, role: 'user', text, date: state.selectedDate, createdAt: now, modifiedAt: now };
   await nutritionPut('chatMessages', userMessage);
@@ -1173,19 +1523,22 @@ async function sendNutritionChat(event) {
   renderChatMessages();
 
   try {
-    const requestId = makeId().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 72);
-    await chatPost({ action: 'nutrition_chat', requestId, message: text, history: previous, context: buildChatContext(text) });
-    const result = await pollChatResult(requestId);
+    // Cedemos un frame para que la UI pinte el estado pendiente antes del cálculo.
+    await new Promise(resolve => setTimeout(resolve, 25));
+    const result = localAssistantAnswer(text);
     const responseTime = Date.now();
-    const assistantMessage = { id: makeId(), personId: state.selectedPersonId, role: 'assistant', text: result.text, date: state.selectedDate, model: result.model || state.chatBackendModel || '', createdAt: responseTime, modifiedAt: responseTime };
+    const assistantMessage = {
+      id: makeId(), personId: state.selectedPersonId, role: 'assistant', text: result.text,
+      date: state.selectedDate, model: ASSISTANT_ENGINE, createdAt: responseTime, modifiedAt: responseTime,
+      ...(result.plan ? { plan: result.plan } : {}),
+    };
     await nutritionPut('chatMessages', assistantMessage);
     state.chatMessages.push(assistantMessage);
-    state.chatBackendModel = result.model || state.chatBackendModel;
-    setChatStatus('ready', result.fallbackUsed ? 'Gemini conectado · respaldo' : 'Gemini conectado', state.chatBackendModel);
+    setChatStatus('ready', 'Asistente local disponible', 'Sin API · funciona offline');
   } catch (error) {
-    console.error('Chat nutricional:', error);
-    showToast(error?.message || 'No se pudo obtener respuesta de Gemini');
-    setChatStatus('error', 'Error en la última consulta', state.chatBackendModel);
+    console.error('Asistente nutricional:', error);
+    showToast(error?.message || 'No se pudo calcular la respuesta');
+    setChatStatus('error', 'Error en el cálculo local', ASSISTANT_ENGINE);
   } finally {
     state.chatBusy = false;
     els.nutritionChatSend.disabled = false;
@@ -1194,15 +1547,41 @@ async function sendNutritionChat(event) {
   }
 }
 
+async function applyAssistantPlan(messageId) {
+  const message = state.chatMessages.find(item => item.id === messageId && item.role === 'assistant');
+  if (!message?.plan?.items?.length || message.planAppliedAt) return;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(message.plan.date || '') ? message.plan.date : state.selectedDate;
+  const now = Date.now();
+  const additions = message.plan.items.map(item => {
+    const mealTypeId = state.mealTypes.some(type => type.id === item.mealTypeId) ? item.mealTypeId : state.mealTypes[0]?.id;
+    return {
+      id: makeId(), personId: message.personId || state.selectedPersonId, date, mealTypeId,
+      foodId: item.foodId,
+      foodSnapshot: { ...item.foodSnapshot },
+      quantityGrams: safeNumber(item.grams),
+      createdAt: now, modifiedAt: now, syncVersion: 1,
+    };
+  }).filter(item => item.mealTypeId && item.quantityGrams > 0);
+  if (!additions.length) return showToast('La propuesta ya no se puede aplicar');
+  await nutritionPutMany('entries', additions);
+  message.planAppliedAt = now;
+  message.modifiedAt = now;
+  await nutritionPut('chatMessages', message);
+  await loadNutritionState({ refreshUsers: false });
+  renderAllNutrition();
+  renderChatMessages();
+  showToast('Propuesta añadida al menú');
+}
+
 async function clearNutritionChatHistory() {
   const messages = chatMessagesForPerson();
   if (!messages.length || state.chatBusy) return;
   const user = state.users.find(item => item.id === state.selectedPersonId);
-  if (!confirm(`¿Empezar un chat nuevo para ${user?.name || 'esta persona'}? Se eliminará el historial del chat y el borrado se sincronizará con tus dispositivos.`)) return;
+  if (!confirm(`¿Empezar una conversación nueva para ${user?.name || 'esta persona'}? Se eliminará el historial del asistente y el borrado se sincronizará con tus dispositivos.`)) return;
   for (const message of messages) await nutritionRemove('chatMessages', message.id);
   state.chatMessages = state.chatMessages.filter(item => item.personId !== state.selectedPersonId);
   renderChatMessages();
-  showToast('Chat local reiniciado');
+  showToast('Asistente reiniciado');
 }
 
 async function refreshForMealsView() {
@@ -1234,7 +1613,7 @@ function setupEvents() {
   els.nutritionChatForm.addEventListener('submit', sendNutritionChat);
   els.closeNutritionChat.addEventListener('click', () => els.nutritionChatDialog.close());
   els.clearNutritionChat.addEventListener('click', () => clearNutritionChatHistory().catch(console.error));
-  els.nutritionChatSettingsButton.addEventListener('click', () => {
+  els.nutritionChatSettingsButton?.addEventListener('click', () => {
     els.nutritionChatDialog.close();
     document.querySelector('[data-view="settings"]')?.click();
   });

@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V11-C.3</title>
+  <title>HomeTasks V11-D</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -22,7 +22,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V11-C.3 · tareas + plan de comidas + Gemini</p>
+          <p class="subtitle">V11-D · tareas + plan de comidas + asistente local</p>
         </div>
       </div>
       <div class="top-actions">
@@ -326,9 +326,9 @@
           <div>
             <p class="eyebrow">Plan de comidas · sincronización independiente</p>
             <h2 id="mealsTitle">Comidas</h2>
-            <p class="section-note">Planifica por persona y calcula calorías y macronutrientes. V11-C.3 sincroniza Comidas por un canal separado y mejora la tolerancia a saturación de Gemini.</p>
+            <p class="section-note">Planifica por persona y calcula calorías y macronutrientes. V11-D mantiene la sincronización de Comidas y añade un asistente nutricional local que funciona sin API.</p>
           </div>
-          <button id="nutritionChatButton" class="secondary-button nutrition-chat-button" type="button" title="Abrir Gemini con el contexto nutricional seleccionado">✨ Chat nutricional <small>Gemini</small></button>
+          <button id="nutritionChatButton" class="secondary-button nutrition-chat-button" type="button" title="Abrir el asistente nutricional local">✨ Asistente nutricional <small>Local</small></button>
         </div>
 
         <article class="card meals-toolbar">
@@ -446,11 +446,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V11-C.3</h3>
+            <h3>Estado de V11-D</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Versión</span><strong>V11-C.3</strong></div>
+            <div class="setting-row"><span>Versión</span><strong>V11-D</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -590,14 +590,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V11-C.3. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-C.3</button>
+            <p>Restablece HomeTasks a los datos iniciales de V11-D. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-D</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-C.3</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-D</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -884,7 +884,7 @@
         <label><span>Carbohidratos / 100 g</span><input id="foodCarbs" type="number" min="0" step="0.1" inputmode="decimal" required /></label>
         <label><span>Grasa / 100 g</span><input id="foodFat" type="number" min="0" step="0.1" inputmode="decimal" required /></label>
         <label><span>Fibra / 100 g <small>(opcional)</small></span><input id="foodFiber" type="number" min="0" step="0.1" inputmode="decimal" /></label>
-        <label><span>Origen</span><select id="foodSource"><option>Manual</option><option>Etiqueta nutricional</option><option>Gemini</option><option value="ChatGPT">ChatGPT (legacy)</option></select></label>
+        <label><span>Origen</span><select id="foodSource"><option>Manual</option><option>Etiqueta nutricional</option><option value="Gemini">Gemini (legacy)</option><option value="ChatGPT">ChatGPT (legacy)</option></select></label>
       </div>
       <div class="dialog-actions task-dialog-actions">
         <button id="deleteFoodButton" class="secondary-button dialog-delete-button" type="button" hidden>Eliminar alimento</button>
@@ -971,40 +971,42 @@
     <div class="nutrition-chat-shell">
       <div class="dialog-header nutrition-chat-header">
         <div>
-          <p class="eyebrow">Comidas · asistente contextual</p>
-          <h2>✨ Chat nutricional</h2>
+          <p class="eyebrow">Comidas · asistente local</p>
+          <h2>✨ Asistente nutricional</h2>
           <p id="nutritionChatContextLabel" class="nutrition-chat-context-label">—</p>
         </div>
         <button id="closeNutritionChat" class="icon-button" type="button" aria-label="Cerrar">×</button>
       </div>
 
       <div class="nutrition-chat-status-row">
-        <span id="nutritionChatStatus" class="nutrition-chat-status checking">Comprobando conexión…</span>
+        <span id="nutritionChatStatus" class="nutrition-chat-status ready">Asistente local disponible</span>
         <span id="nutritionChatModel" class="nutrition-chat-model"></span>
         <button id="clearNutritionChat" class="secondary-button compact-button" type="button">Nuevo chat</button>
       </div>
 
       <div id="nutritionChatSetup" class="nutrition-chat-setup" hidden>
-        <strong>Gemini necesita el backend de V11-C.3</strong>
-        <p id="nutritionChatSetupText">Configura primero el Apps Script y la clave de Gemini.</p>
+        <strong>Asistente local de HomeTasks</strong>
+        <p id="nutritionChatSetupText">No necesita ninguna API externa.</p>
         <button id="nutritionChatSettingsButton" class="secondary-button compact-button" type="button">Abrir Ajustes</button>
       </div>
 
       <div id="nutritionChatMessages" class="nutrition-chat-messages" role="log" aria-live="polite"></div>
 
       <div class="nutrition-chat-suggestions" aria-label="Preguntas rápidas">
-        <button type="button" data-chat-prompt="Analiza mi día de hoy y dime qué está más descompensado respecto a mis objetivos.">Analiza mi día</button>
-        <button type="button" data-chat-prompt="¿Qué me falta para acercarme a mis objetivos de hoy usando alimentos de mi biblioteca cuando sea posible?">Qué me falta</button>
-        <button type="button" data-chat-prompt="Sugiere una cena sencilla para acercarme a mis objetivos de hoy. Indica cantidades aproximadas y explica el porqué.">Sugerir cena</button>
-        <button type="button" data-chat-prompt="Resume mi semana nutricional y señala patrones útiles sin cambiar mis objetivos.">Revisar semana</button>
+        <button type="button" data-chat-prompt="Cómo voy hoy">Cómo voy hoy</button>
+        <button type="button" data-chat-prompt="Qué me falta">Qué me falta</button>
+        <button type="button" data-chat-prompt="Proponer próxima comida">Próxima comida</button>
+        <button type="button" data-chat-prompt="Planifica el resto del día">Planificar resto</button>
+        <button type="button" data-chat-prompt="Hazme un plan del día">Plan del día</button>
+        <button type="button" data-chat-prompt="Revisa mi semana">Revisar semana</button>
       </div>
 
       <form id="nutritionChatForm" class="nutrition-chat-compose">
-        <label class="sr-only" for="nutritionChatInput">Mensaje para Gemini</label>
-        <textarea id="nutritionChatInput" rows="2" maxlength="1800" placeholder="Pregunta sobre tu menú, macros o alimentos…" required></textarea>
+        <label class="sr-only" for="nutritionChatInput">Mensaje para el asistente local</label>
+        <textarea id="nutritionChatInput" rows="2" maxlength="1800" placeholder="Ej. Hazme un plan del día para llegar a mis objetivos…" required></textarea>
         <button id="nutritionChatSend" class="primary-button" type="submit">Enviar</button>
       </form>
-      <p class="nutrition-chat-note">Se envían a Gemini únicamente tu mensaje y el contexto nutricional de Comidas necesario para responder. La clave API permanece en Apps Script, nunca en este dispositivo. En el nivel gratuito de Gemini, Google indica que el contenido puede usarse para mejorar sus productos. Las respuestas son orientativas y no sustituyen consejo médico o dietético profesional.</p>
+      <p class="nutrition-chat-note">El cálculo del asistente se ejecuta completamente en local y no envía datos a ningún servicio de IA. Si tienes activa la sincronización de HomeTasks, el historial del asistente se sincroniza con tu almacenamiento de HomeTasks igual que el resto de datos de Comidas. Usa únicamente los objetivos que tú hayas configurado y los valores de tu biblioteca. Sus propuestas son cálculos orientativos y no sustituyen consejo médico o dietético profesional.</p>
     </div>
   </dialog>
 
