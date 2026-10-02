@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '12-A2';
+const APP_VERSION = '12-B1';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -305,7 +305,7 @@ function cacheElements() {
   [
     'connectionBadge','syncHeaderBadge','globalAddButton','mobileGlobalAddButton','quickActionDialog','closeQuickActionDialog','moreNavButton','moreNavDialog','closeMoreNavDialog','syncOverviewDialog','closeSyncOverviewDialog','syncOverviewPill','syncOverviewText','coreSyncState','coreSyncTime','nutritionSyncState','nutritionSyncTime','globalSyncNowButton','openSyncSettingsButton','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
     'roomFilter','statusFilter','assigneeFilter','taskSearch','taskList','activeRoomHint','newTaskButton',
-    'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayUnassignedNewButton','todayDashboardPending','todayDashboardDone','todayDashboardMinutes','todayDashboardUnassigned','todayAssignedCount','todayUnassignedCount','todayTaskList','todayUnassignedList','todayTomorrowList','todayRecentHistory',
+    'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayUnassignedNewButton','todayContextTasks','todayContextTasksValue','todayContextTasksMeta','todayContextRoutines','todayContextRoutinesValue','todayContextRoutinesMeta','todayContextNutrition','todayContextNutritionValue','todayContextNutritionMeta','todayContextNutritionProgress','todayDashboardPending','todayDashboardDone','todayDashboardMinutes','todayDashboardUnassigned','todayAssignedCount','todayUnassignedCount','todayTaskList','todayUnassignedList','todayTomorrowList','todayRecentHistory',
     'statsPeriodFilter','statsCompleted','statsActiveDays','statsPending','statsOverdue','statsPeriodLabel','statsPeople','statsRooms','statsTrend','historyUserFilter','historyRoomFilter','historyList',
     'routineRoomFilter','routineSearch','routineList','newRoutineButton','templateCount','activeRoutineCount',
     'planPrevWeek','planTodayWeek','planNextWeek','planWeekLabel','planAssigneeFilter','weeklyPlanner','planBacklog','workloadSummary',
@@ -956,6 +956,43 @@ function todayTimelineMarkup(task) {
   return `<div class="today-agenda-row${late}"><time>${escapeHTML(label)}</time><span class="today-agenda-dot"></span><div class="today-agenda-card">${todayTaskMarkup(task)}</div></div>`;
 }
 
+let todayNutritionSummary = null;
+
+function renderTodayNutritionContext() {
+  if (!els.todayContextNutritionValue) return;
+  const summary = todayNutritionSummary;
+  if (!summary || summary.date !== todayISO()) {
+    els.todayContextNutritionValue.textContent = 'Cargando…';
+    els.todayContextNutritionMeta.textContent = 'Resumen del día';
+    if (els.todayContextNutritionProgress) els.todayContextNutritionProgress.style.width = '0%';
+    return;
+  }
+  if (!summary.available) {
+    els.todayContextNutritionValue.textContent = 'Sin persona';
+    els.todayContextNutritionMeta.textContent = 'Configura una persona en Ajustes';
+    if (els.todayContextNutritionProgress) els.todayContextNutritionProgress.style.width = '0%';
+    return;
+  }
+  const consumed = Math.max(0, Number(summary.kcal) || 0);
+  const target = Math.max(0, Number(summary.targetKcal) || 0);
+  els.todayContextNutritionValue.textContent = target > 0
+    ? `${Math.round(consumed)} / ${Math.round(target)} kcal`
+    : `${Math.round(consumed)} kcal`;
+  const protein = Math.max(0, Number(summary.protein) || 0);
+  const targetProtein = Math.max(0, Number(summary.targetProtein) || 0);
+  els.todayContextNutritionMeta.textContent = targetProtein > 0
+    ? `${summary.personName || 'Persona'} · P ${Math.round(protein)}/${Math.round(targetProtein)} g`
+    : `${summary.personName || 'Persona'}${target > 0 ? '' : ' · objetivo sin configurar'}`;
+  if (els.todayContextNutritionProgress) {
+    const percentage = target > 0 ? Math.min(100, Math.max(0, consumed / target * 100)) : 0;
+    els.todayContextNutritionProgress.style.width = `${percentage}%`;
+  }
+}
+
+function requestTodayNutritionSummary() {
+  window.dispatchEvent(new CustomEvent('hometasks:nutrition-summary-request', { detail: { date: todayISO() } }));
+}
+
 function renderToday() {
   if (!els.todayTaskList) return;
   const selected = els.todayAssigneeFilter?.value || 'all';
@@ -975,6 +1012,19 @@ function renderToday() {
     .sort((a, b) => (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99') || byPriorityThenCreated(a, b));
   const doneToday = state.history.filter(item => localISO(new Date(item.completedAt)) === today && (selected === 'all' || (selected === 'unassigned' ? !item.assigneeId : item.assigneeId === selected)));
   const plannedMinutes = assignedToday.reduce((sum, task) => sum + normalizedDuration(task.durationMinutes), 0);
+  const allPendingToday = pendingVisible.filter(task => task.dueDate === today);
+  const routineTasksToday = allPendingToday.filter(task => !!task.templateId);
+  const doneTodayAll = state.history.filter(item => localISO(new Date(item.completedAt)) === today);
+  const unassignedTodayAll = allPendingToday.filter(task => !task.assigneeId);
+
+  if (els.todayContextTasksValue) els.todayContextTasksValue.textContent = `${allPendingToday.length} pendiente${allPendingToday.length === 1 ? '' : 's'}`;
+  if (els.todayContextTasksMeta) els.todayContextTasksMeta.textContent = `${doneTodayAll.length} hecha${doneTodayAll.length === 1 ? '' : 's'} · ${unassignedTodayAll.length} sin asignar`;
+  if (els.todayContextRoutinesValue) els.todayContextRoutinesValue.textContent = `${routineTasksToday.length} programada${routineTasksToday.length === 1 ? '' : 's'}`;
+  if (els.todayContextRoutinesMeta) els.todayContextRoutinesMeta.textContent = routineTasksToday.length
+    ? `${routineTasksToday.filter(task => task.priority === 'high').length ? `${routineTasksToday.filter(task => task.priority === 'high').length} prioritaria${routineTasksToday.filter(task => task.priority === 'high').length === 1 ? '' : 's'} · ` : ''}Tareas creadas desde rutinas`
+    : 'Sin tareas de rutina pendientes';
+  renderTodayNutritionContext();
+  requestTodayNutritionSummary();
 
   els.todayDateLabel.textContent = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
   if (els.todayDashboardPending) els.todayDashboardPending.textContent = assignedToday.length;
@@ -3779,6 +3829,16 @@ function setupEvents() {
   els.todayNewTaskButton?.addEventListener('click', () => openTaskDialog(null, todayISO()));
   els.todayUnassignedNewButton?.addEventListener('click', () => { openTaskDialog(null, todayISO()); if (els.taskAssignee) els.taskAssignee.value = ''; if (els.taskDueTime) els.taskDueTime.value = ''; validateTaskScheduleForm(); });
   els.todayOpenPlanButton?.addEventListener('click', () => switchView('plan'));
+  els.todayContextTasks?.addEventListener('click', () => document.querySelector('.today-plan-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  els.todayContextRoutines?.addEventListener('click', () => switchView('routines'));
+  els.todayContextNutrition?.addEventListener('click', () => {
+    switchView('meals');
+    setTimeout(() => window.dispatchEvent(new CustomEvent('hometasks:meals-show-today')), 60);
+  });
+  window.addEventListener('hometasks:nutrition-summary', event => {
+    todayNutritionSummary = event?.detail || null;
+    renderTodayNutritionContext();
+  });
   els.syncHeaderBadge?.addEventListener('click', () => { renderSyncOverview(); els.syncOverviewDialog?.showModal(); });
   els.closeSyncOverviewDialog?.addEventListener('click', () => els.syncOverviewDialog.close());
   els.openSyncSettingsButton?.addEventListener('click', () => { els.syncOverviewDialog?.close(); switchView('settings'); setTimeout(() => els.syncSettingsCard?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); });
@@ -3872,7 +3932,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V12-A2 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V12-B1 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3890,7 +3950,7 @@ function setupEvents() {
     els.assigneeFilter.value = 'all';
     renderAll();
     window.dispatchEvent(new CustomEvent('hometasks:core-reset'));
-    showToast('V12-A2 restablecida');
+    showToast('V12-B1 restablecida');
   });
 
   window.addEventListener('online', () => { updateConnection(); renderHeaderSyncStatus(); });

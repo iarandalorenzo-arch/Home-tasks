@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V12-A2</title>
+  <title>HomeTasks V12-B1</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -22,7 +22,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V12-A2 · cierre UX</p>
+          <p class="subtitle">V12-B1 · Hoy contextual</p>
         </div>
       </div>
       <div class="top-actions">
@@ -43,6 +43,24 @@
             <p id="todayDateLabel" class="section-note">—</p>
           </div>
           <button id="todayNewTaskButton" class="primary-button" type="button">+ Nueva tarea</button>
+        </div>
+
+        <div class="today-context-strip" aria-label="Resumen contextual de hoy">
+          <button id="todayContextTasks" class="today-context-card tasks" type="button" aria-label="Ir a las tareas de hoy">
+            <span class="today-context-icon" aria-hidden="true">✓</span>
+            <span class="today-context-copy"><small>Tareas hoy</small><strong id="todayContextTasksValue">0 pendientes</strong><span id="todayContextTasksMeta">0 hechas · 0 sin asignar</span></span>
+            <span class="today-context-arrow" aria-hidden="true">›</span>
+          </button>
+          <button id="todayContextRoutines" class="today-context-card routines" type="button" aria-label="Abrir rutinas">
+            <span class="today-context-icon" aria-hidden="true">↻</span>
+            <span class="today-context-copy"><small>Rutinas hoy</small><strong id="todayContextRoutinesValue">0 programadas</strong><span id="todayContextRoutinesMeta">Sin tareas de rutina pendientes</span></span>
+            <span class="today-context-arrow" aria-hidden="true">›</span>
+          </button>
+          <button id="todayContextNutrition" class="today-context-card nutrition" type="button" aria-label="Abrir comidas de hoy">
+            <span class="today-context-icon" aria-hidden="true">🍽</span>
+            <span class="today-context-copy"><small>Comidas</small><strong id="todayContextNutritionValue">Cargando…</strong><span id="todayContextNutritionMeta">Resumen del día</span><span class="today-context-progress" aria-hidden="true"><i id="todayContextNutritionProgress"></i></span></span>
+            <span class="today-context-arrow" aria-hidden="true">›</span>
+          </button>
         </div>
 
         <div class="today-dashboard-grid">
@@ -447,11 +465,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V12-A2</h3>
+            <h3>Estado de V12-B1</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Versión</span><strong>V12-A2</strong></div>
+            <div class="setting-row"><span>Versión</span><strong>V12-B1</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -591,14 +609,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V12-A2. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, histórico y datos locales de Comidas de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V12-A2</button>
+            <p>Restablece HomeTasks a los datos iniciales de V12-B1. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, histórico y datos locales de Comidas de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V12-B1</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V12-A2</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V12-B1</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>

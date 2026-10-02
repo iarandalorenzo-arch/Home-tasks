@@ -9,7 +9,7 @@ import {
   NUTRITION_DATA_STORES,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '12-A2';
+const NUTRITION_VERSION = '12-B1';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -659,9 +659,36 @@ function setMode(mode) {
   else renderFoods();
 }
 
+function emitTodayNutritionSummary(date = localISO()) {
+  const user = state.users.find(item => item.id === state.selectedPersonId) || null;
+  if (!user) {
+    window.dispatchEvent(new CustomEvent('hometasks:nutrition-summary', { detail: { date, available: false } }));
+    return;
+  }
+  const totals = totalsFor(user.id, date);
+  const target = state.targets.find(item => item.personId === user.id) || null;
+  window.dispatchEvent(new CustomEvent('hometasks:nutrition-summary', {
+    detail: {
+      date,
+      available: true,
+      personId: user.id,
+      personName: user.name || 'Persona',
+      kcal: totals.kcal,
+      protein: totals.protein,
+      carbs: totals.carbs,
+      fat: totals.fat,
+      targetKcal: safeNumber(target?.kcal),
+      targetProtein: safeNumber(target?.protein),
+      targetCarbs: safeNumber(target?.carbs),
+      targetFat: safeNumber(target?.fat),
+    },
+  }));
+}
+
 function renderAllNutrition() {
   renderPersonSelect();
   setMode(state.mode);
+  emitTodayNutritionSummary(localISO());
 }
 
 function setSelectedDate(value) {
@@ -1882,6 +1909,16 @@ function setupEvents() {
       setMode('day');
       openEntryDialog(null, state.mealTypes[0]?.id || '');
     }
+  });
+  window.addEventListener('hometasks:nutrition-summary-request', event => {
+    emitTodayNutritionSummary(event?.detail?.date || localISO());
+  });
+  window.addEventListener('hometasks:meals-show-today', () => {
+    state.selectedDate = localISO();
+    localStorage.setItem(LS_SELECTED_DATE, state.selectedDate);
+    setMode('day');
+    renderDateControls();
+    renderDay();
   });
   window.addEventListener('hometasks:nutrition-changed', () => {
     markNutritionDirty();
