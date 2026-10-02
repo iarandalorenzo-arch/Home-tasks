@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V11-C.2</title>
+  <title>HomeTasks V11-C.3</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -22,7 +22,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V11-C.2 · tareas + plan de comidas + Gemini</p>
+          <p class="subtitle">V11-C.3 · tareas + plan de comidas + Gemini</p>
         </div>
       </div>
       <div class="top-actions">
@@ -326,7 +326,7 @@
           <div>
             <p class="eyebrow">Plan de comidas · sincronización independiente</p>
             <h2 id="mealsTitle">Comidas</h2>
-            <p class="section-note">Planifica por persona y calcula calorías y macronutrientes. V11-C.2 sincroniza Comidas por un canal separado del núcleo de tareas.</p>
+            <p class="section-note">Planifica por persona y calcula calorías y macronutrientes. V11-C.3 sincroniza Comidas por un canal separado y mejora la tolerancia a saturación de Gemini.</p>
           </div>
           <button id="nutritionChatButton" class="secondary-button nutrition-chat-button" type="button" title="Abrir Gemini con el contexto nutricional seleccionado">✨ Chat nutricional <small>Gemini</small></button>
         </div>
@@ -446,11 +446,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V11-C.2</h3>
+            <h3>Estado de V11-C.3</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Versión</span><strong>V11-C.2</strong></div>
+            <div class="setting-row"><span>Versión</span><strong>V11-C.3</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -590,14 +590,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V11-C.2. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-C.2</button>
+            <p>Restablece HomeTasks a los datos iniciales de V11-C.3. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-C.3</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-C.2</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-C.3</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -985,7 +985,7 @@
       </div>
 
       <div id="nutritionChatSetup" class="nutrition-chat-setup" hidden>
-        <strong>Gemini necesita el backend de V11-C.2</strong>
+        <strong>Gemini necesita el backend de V11-C.3</strong>
         <p id="nutritionChatSetupText">Configura primero el Apps Script y la clave de Gemini.</p>
         <button id="nutritionChatSettingsButton" class="secondary-button compact-button" type="button">Abrir Ajustes</button>
       </div>

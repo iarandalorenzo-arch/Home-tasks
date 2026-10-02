@@ -9,7 +9,7 @@ import {
   NUTRITION_DATA_STORES,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '11-C.2';
+const NUTRITION_VERSION = '11-C.3';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -20,8 +20,8 @@ const LS_DEVICE_ID = 'hometasks-device-id';
 const LS_NUTRITION_SYNC_DIRTY = 'hometasks-nutrition-sync-dirty';
 const LS_NUTRITION_SYNC_REVISION = 'hometasks-nutrition-sync-revision';
 const LS_NUTRITION_LAST_SYNC = 'hometasks-nutrition-sync-last';
-const CHAT_HISTORY_LIMIT = 10;
-const CHAT_LIBRARY_LIMIT = 80;
+const CHAT_HISTORY_LIMIT = 8;
+const CHAT_LIBRARY_LIMIT = 50;
 const DEFAULT_MEAL_TYPES = [
   { id: 'breakfast', name: 'Desayuno', order: 10, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
   { id: 'lunch', name: 'Comida', order: 20, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
@@ -1006,7 +1006,7 @@ function chatJsonpRequest(action, params = {}, timeoutMs = 25000) {
   });
 }
 
-async function chatPost(payload, timeoutMs = 95000) {
+async function chatPost(payload, timeoutMs = 130000) {
   const { endpoint, houseKey } = chatBackendConfig();
   if (!endpoint || !houseKey) throw new Error('Configura primero Apps Script en Ajustes.');
   const controller = new AbortController();
@@ -1037,7 +1037,7 @@ function chatMessagesForPerson(personId = state.selectedPersonId) {
     .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
 }
 
-function buildChatContext() {
+function buildChatContext(message = '') {
   const user = state.users.find(item => item.id === state.selectedPersonId);
   const target = currentTarget();
   const totals = totalsFor(state.selectedPersonId, state.selectedDate);
@@ -1054,9 +1054,10 @@ function buildChatContext() {
     const date = shiftISO(weekStart, index);
     return { date, totals: totalsFor(state.selectedPersonId, date), plannedFoods: entriesFor(state.selectedPersonId, date).length };
   });
-  const library = state.foods.slice(0, CHAT_LIBRARY_LIMIT).map(food => ({
+  const needsLibrary = /(alimento|comida|cena|desayuno|merienda|almuerzo|receta|ingrediente|biblioteca|qué comer|que comer|qué puedo comer|que puedo comer|suger|recom|propon|idea de menú|idea de menu|menú|menu|tengo en casa)/i.test(String(message || '').toLowerCase());
+  const library = needsLibrary ? state.foods.slice(0, CHAT_LIBRARY_LIMIT).map(food => ({
     name: food.name, kcal: safeNumber(food.kcal), protein: safeNumber(food.protein), carbs: safeNumber(food.carbs), fat: safeNumber(food.fat), fiber: safeNumber(food.fiber), source: food.source || 'Manual',
-  }));
+  })) : [];
   return {
     person: { id: state.selectedPersonId, name: user?.name || 'Persona seleccionada' },
     selectedDate: state.selectedDate,
@@ -1065,8 +1066,7 @@ function buildChatContext() {
     meals,
     weekStart,
     week,
-    foodLibrary: library,
-    foodLibraryTruncated: state.foods.length > CHAT_LIBRARY_LIMIT,
+    ...(needsLibrary ? { foodLibrary: library, foodLibraryTruncated: state.foods.length > CHAT_LIBRARY_LIMIT } : { foodLibraryOmitted: true }),
   };
 }
 
@@ -1101,7 +1101,7 @@ async function refreshChatBackendStatus() {
     state.chatBackendReady = false;
     setChatStatus('error', 'Apps Script sin configurar');
     els.nutritionChatSetup.hidden = false;
-    els.nutritionChatSetupText.textContent = 'Configura la URL /exec y la clave de la casa en Ajustes. V11-C.2 usa ese mismo backend como proxy seguro.';
+    els.nutritionChatSetupText.textContent = 'Configura la URL /exec y la clave de la casa en Ajustes. V11-C.3 usa ese mismo backend como proxy seguro.';
     return false;
   }
   setChatStatus('checking', 'Comprobando Gemini…');
@@ -1116,7 +1116,7 @@ async function refreshChatBackendStatus() {
     }
     const message = result.error === 'unauthorized'
       ? 'La clave de la casa no coincide con el Apps Script desplegado.'
-      : 'Añade GEMINI_API_KEY en Propiedades de script del proyecto Apps Script y vuelve a desplegar V11-C.2.';
+      : 'Añade GEMINI_API_KEY en Propiedades de script del proyecto Apps Script y vuelve a desplegar V11-C.3.';
     setChatStatus('error', 'Gemini sin configurar');
     els.nutritionChatSetup.hidden = false;
     els.nutritionChatSetupText.textContent = message;
@@ -1174,14 +1174,14 @@ async function sendNutritionChat(event) {
 
   try {
     const requestId = makeId().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 72);
-    await chatPost({ action: 'nutrition_chat', requestId, message: text, history: previous, context: buildChatContext() });
+    await chatPost({ action: 'nutrition_chat', requestId, message: text, history: previous, context: buildChatContext(text) });
     const result = await pollChatResult(requestId);
     const responseTime = Date.now();
     const assistantMessage = { id: makeId(), personId: state.selectedPersonId, role: 'assistant', text: result.text, date: state.selectedDate, model: result.model || state.chatBackendModel || '', createdAt: responseTime, modifiedAt: responseTime };
     await nutritionPut('chatMessages', assistantMessage);
     state.chatMessages.push(assistantMessage);
     state.chatBackendModel = result.model || state.chatBackendModel;
-    setChatStatus('ready', 'Gemini conectado', state.chatBackendModel);
+    setChatStatus('ready', result.fallbackUsed ? 'Gemini conectado · respaldo' : 'Gemini conectado', state.chatBackendModel);
   } catch (error) {
     console.error('Chat nutricional:', error);
     showToast(error?.message || 'No se pudo obtener respuesta de Gemini');
