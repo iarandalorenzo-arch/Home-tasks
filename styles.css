@@ -1804,7 +1804,7 @@ html.tablet-ui .meal-week-open small { font-size: 8px; }
 }
 
 
-/* V12-A1 - navegacion unificada, accion global y estado de sincronizacion */
+/* V12-A1.1 - navegacion unificada, accion global y estado de sincronizacion */
 .global-add-button {
   min-height: 38px; padding: 0 13px; display: inline-flex; align-items: center; gap: 7px;
   border: 0; border-radius: 13px; background: var(--accent); color: white; font-size: 12px; font-weight: 850;
@@ -1813,6 +1813,7 @@ html.tablet-ui .meal-week-open small { font-size: 8px; }
 .global-add-button span { font-size: 20px; line-height: 1; font-weight: 500; }
 .global-add-button:hover { background: var(--accent-strong); }
 .nav-more { display: none; }
+.mobile-global-add-button { display: none; }
 
 .ux-sheet-dialog {
   width: min(560px, calc(100% - 24px)); max-width: none; padding: 0; border: 0; border-radius: 22px;
@@ -1874,13 +1875,15 @@ html.tablet-ui .meal-week-open small { font-size: 8px; }
   .bottom-nav .nav-more { display: grid; }
   .bottom-nav .nav-item span { font-size: 18px !important; }
   .bottom-nav .nav-item small { max-width: none !important; font-size: 9px !important; }
-  .global-add-button {
-    position: fixed; z-index: 34; right: max(15px, env(safe-area-inset-right)); bottom: calc(82px + env(safe-area-inset-bottom));
-    width: 52px; min-height: 52px; padding: 0; justify-content: center; border-radius: 17px;
-    box-shadow: 0 12px 28px color-mix(in srgb,var(--accent) 32%,transparent);
+  .global-add-button { display: none; }
+  .mobile-global-add-button {
+    position: fixed; z-index: 36; right: max(15px, env(safe-area-inset-right)); bottom: calc(88px + env(safe-area-inset-bottom));
+    width: 54px; height: 54px; padding: 0; display: grid; place-items: center;
+    border: 0; border-radius: 18px; background: var(--accent); color: white;
+    box-shadow: 0 12px 30px color-mix(in srgb,var(--accent) 36%,transparent);
+    font-size: 31px; font-weight: 500; line-height: 1; touch-action: manipulation;
   }
-  .global-add-button strong { display: none; }
-  .global-add-button span { font-size: 28px; }
+  .mobile-global-add-button:active { transform: scale(.96); }
   .ux-sheet-dialog { width: 100%; max-height: calc(100dvh - 24px); margin: auto 0 0; border-radius: 22px 22px 0 0; }
   .ux-sheet-card { padding: 15px 13px calc(16px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; border-left: 0; border-right: 0; border-bottom: 0; }
   .ux-sheet-header { margin-bottom: 11px; }

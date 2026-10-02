@@ -303,7 +303,7 @@ const els = {};
 
 function cacheElements() {
   [
-    'connectionBadge','syncHeaderBadge','globalAddButton','quickActionDialog','closeQuickActionDialog','moreNavButton','moreNavDialog','closeMoreNavDialog','syncOverviewDialog','closeSyncOverviewDialog','syncOverviewPill','syncOverviewText','coreSyncState','coreSyncTime','nutritionSyncState','nutritionSyncTime','globalSyncNowButton','openSyncSettingsButton','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
+    'connectionBadge','syncHeaderBadge','globalAddButton','mobileGlobalAddButton','quickActionDialog','closeQuickActionDialog','moreNavButton','moreNavDialog','closeMoreNavDialog','syncOverviewDialog','closeSyncOverviewDialog','syncOverviewPill','syncOverviewText','coreSyncState','coreSyncTime','nutritionSyncState','nutritionSyncTime','globalSyncNowButton','openSyncSettingsButton','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
     'roomFilter','statusFilter','assigneeFilter','taskSearch','taskList','activeRoomHint','newTaskButton',
     'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayUnassignedNewButton','todayDashboardPending','todayDashboardDone','todayDashboardMinutes','todayDashboardUnassigned','todayAssignedCount','todayUnassignedCount','todayTaskList','todayUnassignedList','todayTomorrowList','todayRecentHistory',
     'statsPeriodFilter','statsCompleted','statsActiveDays','statsPending','statsOverdue','statsPeriodLabel','statsPeople','statsRooms','statsTrend','historyUserFilter','historyRoomFilter','historyList',
@@ -3793,6 +3793,7 @@ function setupEvents() {
     renderSyncOverview();
   });
   els.globalAddButton?.addEventListener('click', () => els.quickActionDialog?.showModal());
+  els.mobileGlobalAddButton?.addEventListener('click', () => els.quickActionDialog?.showModal());
   els.closeQuickActionDialog?.addEventListener('click', () => els.quickActionDialog.close());
   document.querySelectorAll('[data-quick-action]').forEach(button => button.addEventListener('click', () => runQuickAction(button.dataset.quickAction)));
   els.moreNavButton?.addEventListener('click', () => els.moreNavDialog?.showModal());
@@ -3871,7 +3872,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V12-A1 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V12-A1.1 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3889,7 +3890,7 @@ function setupEvents() {
     els.assigneeFilter.value = 'all';
     renderAll();
     window.dispatchEvent(new CustomEvent('hometasks:core-reset'));
-    showToast('V12-A1 restablecida');
+    showToast('V12-A1.1 restablecida');
   });
 
   window.addEventListener('online', () => { updateConnection(); renderHeaderSyncStatus(); });
