@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '11-D3';
+const APP_VERSION = '12-A1';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -9,6 +9,9 @@ const LS_CLOUD_LINKED = 'hometasks-sync-linked';
 const LS_LAST_SYNC = 'hometasks-sync-last-sync';
 const LS_AUTO_SYNC = 'hometasks-sync-auto';
 const LS_CLOUD_DIRTY = 'hometasks-sync-dirty';
+const LS_NUTRITION_SYNC_DIRTY = 'hometasks-nutrition-sync-dirty';
+const LS_NUTRITION_LAST_SYNC = 'hometasks-nutrition-sync-last';
+const LS_NUTRITION_SYNC_ERROR = 'hometasks-nutrition-sync-error';
 const LS_DEVICE_ID = 'hometasks-device-id';
 const LS_LAST_SYNC_ATTEMPT = 'hometasks-sync-last-attempt';
 const LS_LAST_SYNC_RESULT = 'hometasks-sync-last-result';
@@ -290,6 +293,8 @@ const state = {
   syncProgress: { visible: false, active: false, percent: 0, label: '', detail: '', state: 'idle' },
   syncProgressHideTimer: null,
   syncError: '',
+  nutritionSyncBusy: false,
+  nutritionSyncError: localStorage.getItem(LS_NUTRITION_SYNC_ERROR) || '',
   reminderTimer: null,
   installPrompt: null,
 };
@@ -298,7 +303,7 @@ const els = {};
 
 function cacheElements() {
   [
-    'connectionBadge','syncHeaderBadge','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
+    'connectionBadge','syncHeaderBadge','globalAddButton','quickActionDialog','closeQuickActionDialog','moreNavButton','moreNavDialog','closeMoreNavDialog','syncOverviewDialog','closeSyncOverviewDialog','syncOverviewPill','syncOverviewText','coreSyncState','coreSyncTime','nutritionSyncState','nutritionSyncTime','globalSyncNowButton','openSyncSettingsButton','pendingCount','overdueCount','todayCount','completedTodayCount','nextTask','floorPlan','roomSummary','houseNameDisplay','clearRoomFilterButton',
     'roomFilter','statusFilter','assigneeFilter','taskSearch','taskList','activeRoomHint','newTaskButton',
     'todayDateLabel','todayAssigneeFilter','todayNewTaskButton','todayOpenPlanButton','todayUnassignedNewButton','todayDashboardPending','todayDashboardDone','todayDashboardMinutes','todayDashboardUnassigned','todayAssignedCount','todayUnassignedCount','todayTaskList','todayUnassignedList','todayTomorrowList','todayRecentHistory',
     'statsPeriodFilter','statsCompleted','statsActiveDays','statsPending','statsOverdue','statsPeriodLabel','statsPeople','statsRooms','statsTrend','historyUserFilter','historyRoomFilter','historyList',
@@ -2213,11 +2218,31 @@ async function saveRoomNames() {
 }
 
 function switchView(view) {
+  if (!view || !document.getElementById(`view-${view}`)) return;
   state.view = view;
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el.id === `view-${view}`));
-  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view));
+  document.querySelectorAll('.nav-item[data-view]').forEach(el => el.classList.toggle('active', el.dataset.view === view));
+  const moreViews = new Set(['routines', 'history', 'settings']);
+  if (els.moreNavButton) els.moreNavButton.classList.toggle('active', moreViews.has(view) && window.matchMedia('(max-width: 700px)').matches);
+  if (els.moreNavDialog?.open) els.moreNavDialog.close();
   document.getElementById('mainContent').focus({ preventScroll: true });
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function runQuickAction(action) {
+  if (els.quickActionDialog?.open) els.quickActionDialog.close();
+  if (action === 'task') {
+    openTaskDialog(null, state.view === 'today' ? todayISO() : null);
+    return;
+  }
+  if (action === 'routine') {
+    openRoutineDialog();
+    return;
+  }
+  if (action === 'meal' || action === 'food') {
+    switchView('meals');
+    setTimeout(() => window.dispatchEvent(new CustomEvent('hometasks:quick-action', { detail: { action } })), 60);
+  }
 }
 
 function syncConfigured() {
@@ -2865,11 +2890,61 @@ function finishSyncProgress(ok, label, detail = '') {
   }
 }
 
+function nutritionSyncDirty() {
+  return localStorage.getItem(LS_NUTRITION_SYNC_DIRTY) === '1';
+}
+
+function syncStatusLabel({ busy = false, error = '', dirty = false, lastSync = null } = {}) {
+  if (busy) return { label: 'Sincronizando', className: 'busy' };
+  if (error) return { label: 'Error', className: 'error' };
+  if (dirty) return { label: 'Pendiente', className: 'pending' };
+  if (lastSync) return { label: 'Sincronizado', className: 'ok' };
+  return { label: 'Sin datos', className: 'offline' };
+}
+
+function renderSyncOverview() {
+  const linked = syncLinked();
+  const configured = syncConfigured();
+  const coreDirty = localStorage.getItem(LS_CLOUD_DIRTY) === '1';
+  const nutritionDirty = nutritionSyncDirty();
+  const nutritionError = state.nutritionSyncError || localStorage.getItem(LS_NUTRITION_SYNC_ERROR) || '';
+  const coreLast = localStorage.getItem(LS_LAST_SYNC);
+  const nutritionLast = localStorage.getItem(LS_NUTRITION_LAST_SYNC);
+  const core = syncStatusLabel({ busy: state.syncBusy, error: state.syncError, dirty: coreDirty, lastSync: coreLast });
+  const nutrition = syncStatusLabel({ busy: state.nutritionSyncBusy, error: nutritionError, dirty: nutritionDirty, lastSync: nutritionLast });
+
+  if (els.coreSyncState) {
+    els.coreSyncState.textContent = core.label;
+    els.coreSyncState.className = core.className;
+  }
+  if (els.nutritionSyncState) {
+    els.nutritionSyncState.textContent = nutrition.label;
+    els.nutritionSyncState.className = nutrition.className;
+  }
+  if (els.coreSyncTime) els.coreSyncTime.textContent = coreLast ? `Última: ${formatSyncTime(coreLast)}` : 'Nunca sincronizado';
+  if (els.nutritionSyncTime) els.nutritionSyncTime.textContent = nutritionLast ? `Última: ${formatSyncTime(nutritionLast)}` : 'Nunca sincronizado';
+
+  let overall = { label: '✓ Sincronizado', className: 'ok', text: 'HomeTasks y Comidas están al día.' };
+  if (!navigator.onLine) overall = { label: 'Offline', className: 'offline', text: 'Los cambios se conservan localmente y se enviarán al recuperar conexión.' };
+  else if (!configured || !linked) overall = { label: 'Sin configurar', className: 'offline', text: 'Configura o vincula la sincronización desde Ajustes.' };
+  else if (state.syncBusy || state.nutritionSyncBusy) overall = { label: '↻ Sincronizando', className: 'busy', text: 'Actualizando los datos entre tus dispositivos.' };
+  else if (state.syncError || nutritionError) overall = { label: '⚠ Error', className: 'error', text: 'Alguna parte de la sincronización no se ha completado.' };
+  else if (coreDirty || nutritionDirty) overall = { label: '● Cambios pendientes', className: 'pending', text: 'Hay cambios locales pendientes de enviar.' };
+
+  if (els.syncOverviewPill) {
+    els.syncOverviewPill.textContent = overall.label;
+    els.syncOverviewPill.className = `sync-overview-pill ${overall.className}`;
+  }
+  if (els.syncOverviewText) els.syncOverviewText.textContent = overall.text;
+  if (els.globalSyncNowButton) els.globalSyncNowButton.disabled = !navigator.onLine || !configured || !linked || state.syncBusy;
+  return overall;
+}
+
 function renderHeaderSyncStatus() {
   if (!els.syncHeaderBadge) return;
   const linked = syncLinked();
   const configured = syncConfigured();
-  const dirty = localStorage.getItem(LS_CLOUD_DIRTY) === '1';
+  const overall = renderSyncOverview();
   els.syncHeaderBadge.className = 'sync-header-badge';
   if (!navigator.onLine) {
     els.syncHeaderBadge.textContent = linked ? 'Offline' : 'Local';
@@ -2878,19 +2953,13 @@ function renderHeaderSyncStatus() {
     els.syncHeaderBadge.textContent = 'Sin nube';
   } else if (!linked) {
     els.syncHeaderBadge.textContent = 'Nube lista';
-  } else if (state.syncBusy) {
-    els.syncHeaderBadge.textContent = '↻ Sync';
-    els.syncHeaderBadge.classList.add('busy');
-  } else if (state.syncError) {
-    els.syncHeaderBadge.textContent = '! Sync';
-    els.syncHeaderBadge.classList.add('error');
-  } else if (dirty) {
-    els.syncHeaderBadge.textContent = '↑ Pendiente';
-    els.syncHeaderBadge.classList.add('pending');
   } else {
-    els.syncHeaderBadge.textContent = '✓ Sync';
-    els.syncHeaderBadge.classList.add('ok');
+    els.syncHeaderBadge.textContent = overall.label;
+    els.syncHeaderBadge.classList.add(overall.className);
   }
+  const coreLast = localStorage.getItem(LS_LAST_SYNC);
+  const nutritionLast = localStorage.getItem(LS_NUTRITION_LAST_SYNC);
+  els.syncHeaderBadge.title = `HomeTasks: ${coreLast ? formatSyncTime(coreLast) : 'nunca'} · Comidas: ${nutritionLast ? formatSyncTime(nutritionLast) : 'nunca'}`;
 }
 
 function renderSyncPanel() {
@@ -3692,7 +3761,7 @@ function setupInstallPrompt() {
 }
 
 function setupEvents() {
-  document.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', () => switchView(button.dataset.view)));
+  document.querySelectorAll('.nav-item[data-view]').forEach(button => button.addEventListener('click', () => switchView(button.dataset.view)));
   [els.roomFilter, els.statusFilter, els.assigneeFilter].forEach(el => el.addEventListener('change', renderTasks));
   els.taskSearch.addEventListener('input', renderTasks);
   [els.historyUserFilter, els.historyRoomFilter].forEach(el => el.addEventListener('change', renderHistory));
@@ -3710,7 +3779,25 @@ function setupEvents() {
   els.todayNewTaskButton?.addEventListener('click', () => openTaskDialog(null, todayISO()));
   els.todayUnassignedNewButton?.addEventListener('click', () => { openTaskDialog(null, todayISO()); if (els.taskAssignee) els.taskAssignee.value = ''; if (els.taskDueTime) els.taskDueTime.value = ''; validateTaskScheduleForm(); });
   els.todayOpenPlanButton?.addEventListener('click', () => switchView('plan'));
-  els.syncHeaderBadge?.addEventListener('click', () => { switchView('settings'); setTimeout(() => els.syncSettingsCard?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); });
+  els.syncHeaderBadge?.addEventListener('click', () => { renderSyncOverview(); els.syncOverviewDialog?.showModal(); });
+  els.closeSyncOverviewDialog?.addEventListener('click', () => els.syncOverviewDialog.close());
+  els.openSyncSettingsButton?.addEventListener('click', () => { els.syncOverviewDialog?.close(); switchView('settings'); setTimeout(() => els.syncSettingsCard?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); });
+  els.globalSyncNowButton?.addEventListener('click', async () => {
+    if (!syncConfigured() || !syncLinked()) {
+      els.syncOverviewDialog?.close();
+      switchView('settings');
+      setTimeout(() => els.syncSettingsCard?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+      return;
+    }
+    await syncNow({ silent: false });
+    renderSyncOverview();
+  });
+  els.globalAddButton?.addEventListener('click', () => els.quickActionDialog?.showModal());
+  els.closeQuickActionDialog?.addEventListener('click', () => els.quickActionDialog.close());
+  document.querySelectorAll('[data-quick-action]').forEach(button => button.addEventListener('click', () => runQuickAction(button.dataset.quickAction)));
+  els.moreNavButton?.addEventListener('click', () => els.moreNavDialog?.showModal());
+  els.closeMoreNavDialog?.addEventListener('click', () => els.moreNavDialog.close());
+  document.querySelectorAll('[data-more-view]').forEach(button => button.addEventListener('click', () => switchView(button.dataset.moreView)));
   els.newRoutineButton.addEventListener('click', () => openRoutineDialog());
   els.closeDialogButton.addEventListener('click', () => { state.editingTaskId = null; els.taskDialog.close(); });
   els.cancelDialogButton.addEventListener('click', () => { state.editingTaskId = null; els.taskDialog.close(); });
@@ -3784,7 +3871,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V11-D3 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V12-A1 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3802,11 +3889,20 @@ function setupEvents() {
     els.assigneeFilter.value = 'all';
     renderAll();
     window.dispatchEvent(new CustomEvent('hometasks:core-reset'));
-    showToast('V11-D3 restablecida');
+    showToast('V12-A1 restablecida');
   });
 
-  window.addEventListener('online', updateConnection);
-  window.addEventListener('offline', updateConnection);
+  window.addEventListener('online', () => { updateConnection(); renderHeaderSyncStatus(); });
+  window.addEventListener('offline', () => { updateConnection(); renderHeaderSyncStatus(); });
+  window.addEventListener('hometasks:nutrition-changed', () => renderHeaderSyncStatus());
+  window.addEventListener('hometasks:nutrition-sync-state', event => {
+    state.nutritionSyncBusy = Boolean(event.detail?.busy);
+    state.nutritionSyncError = String(event.detail?.error || '');
+    renderHeaderSyncStatus();
+  });
+  window.addEventListener('storage', event => {
+    if ([LS_CLOUD_DIRTY, LS_LAST_SYNC, LS_NUTRITION_SYNC_DIRTY, LS_NUTRITION_LAST_SYNC, LS_NUTRITION_SYNC_ERROR].includes(event.key)) renderHeaderSyncStatus();
+  });
 }
 
 async function init() {

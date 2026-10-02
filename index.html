@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V11-D3</title>
+  <title>HomeTasks V12-A1</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -22,10 +22,11 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V11-D3 · tareas + plan de comidas + asistente local</p>
+          <p class="subtitle">V12-A1 · experiencia unificada</p>
         </div>
       </div>
       <div class="top-actions">
+        <button id="globalAddButton" class="global-add-button" type="button" aria-label="Añadir" title="Añadir"><span aria-hidden="true">+</span><strong>Añadir</strong></button>
         <button id="syncHeaderBadge" class="sync-header-badge" type="button" title="Estado de sincronización">Sin nube</button>
         <span id="connectionBadge" class="status-badge" title="Estado de conexion">Local</span>
         <button id="fullscreenButton" class="icon-button tablet-quick-fullscreen" type="button" aria-label="Pantalla completa" title="Pantalla completa" hidden>⛶</button>
@@ -326,7 +327,7 @@
           <div>
             <p class="eyebrow">Plan de comidas · sincronización independiente</p>
             <h2 id="mealsTitle">Comidas</h2>
-            <p class="section-note">Planifica por persona y calcula calorías y macronutrientes. V11-D3 mantiene el asistente local y añade reglas de ración, compatibilidad por comida, variedad y sustituciones.</p>
+            <p class="section-note">Planifica por persona, calcula calorías y macronutrientes y usa el asistente nutricional local.</p>
           </div>
           <button id="nutritionChatButton" class="secondary-button nutrition-chat-button" type="button" title="Abrir el asistente nutricional local">✨ Asistente nutricional <small>Local</small></button>
         </div>
@@ -446,11 +447,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V11-D3</h3>
+            <h3>Estado de V12-A1</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Versión</span><strong>V11-D3</strong></div>
+            <div class="setting-row"><span>Versión</span><strong>V12-A1</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -590,14 +591,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V11-D3. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-D3</button>
+            <p>Restablece HomeTasks a los datos iniciales de V12-A1. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V12-A1</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-D3</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V12-A1</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -631,14 +632,15 @@
       </section>
     </main>
 
-    <nav class="bottom-nav" aria-label="Navegacion principal">
+    <nav class="bottom-nav" aria-label="Navegación principal">
       <button class="nav-item active" data-view="today" type="button"><span>☀</span><small>Hoy</small></button>
       <button class="nav-item" data-view="plan" type="button"><span>▦</span><small>Plan</small></button>
       <button class="nav-item" data-view="tasks" type="button"><span>✓</span><small>Tareas</small></button>
       <button class="nav-item" data-view="meals" type="button"><span>🍽</span><small>Comidas</small></button>
-      <button class="nav-item" data-view="routines" type="button"><span>↻</span><small>Rutinas</small></button>
-      <button class="nav-item" data-view="history" type="button"><span>◷</span><small>Actividad</small></button>
-      <button class="nav-item" data-view="settings" type="button"><span>⚙</span><small>Ajustes</small></button>
+      <button class="nav-item nav-secondary" data-view="routines" type="button"><span>↻</span><small>Rutinas</small></button>
+      <button class="nav-item nav-secondary" data-view="history" type="button"><span>◷</span><small>Actividad</small></button>
+      <button class="nav-item nav-secondary" data-view="settings" type="button"><span>⚙</span><small>Ajustes</small></button>
+      <button id="moreNavButton" class="nav-item nav-more" type="button" aria-haspopup="dialog" aria-controls="moreNavDialog"><span>•••</span><small>Más</small></button>
     </nav>
   </div>
 
@@ -1029,6 +1031,54 @@
             <p>El asistente trabaja con los objetivos que has configurado, tu menú y tu biblioteca de alimentos. Respeta las reglas de ración y comidas permitidas de cada alimento. Las propuestas son orientativas y no sustituyen consejo médico o dietético profesional.</p>
           </details>
         </section>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="quickActionDialog" class="ux-sheet-dialog quick-action-dialog" aria-labelledby="quickActionTitle">
+    <div class="ux-sheet-card">
+      <div class="ux-sheet-header">
+        <div><p class="eyebrow">Acción rápida</p><h2 id="quickActionTitle">Añadir</h2></div>
+        <button id="closeQuickActionDialog" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="quick-action-grid">
+        <button type="button" class="quick-action-card" data-quick-action="task"><span class="quick-action-icon">✓</span><span><strong>Nueva tarea</strong><small>Crear una tarea desde cualquier pantalla</small></span></button>
+        <button type="button" class="quick-action-card" data-quick-action="meal"><span class="quick-action-icon">🍽</span><span><strong>Añadir comida</strong><small>Registrar un alimento en el día seleccionado</small></span></button>
+        <button type="button" class="quick-action-card" data-quick-action="routine"><span class="quick-action-icon">↻</span><span><strong>Nueva rutina</strong><small>Crear una actividad recurrente</small></span></button>
+        <button type="button" class="quick-action-card" data-quick-action="food"><span class="quick-action-icon">+</span><span><strong>Nuevo alimento</strong><small>Añadirlo a la biblioteca de Comidas</small></span></button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="moreNavDialog" class="ux-sheet-dialog more-nav-dialog" aria-labelledby="moreNavTitle">
+    <div class="ux-sheet-card">
+      <div class="ux-sheet-header">
+        <div><p class="eyebrow">HomeTasks</p><h2 id="moreNavTitle">Más</h2></div>
+        <button id="closeMoreNavDialog" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="more-nav-list">
+        <button type="button" data-more-view="routines"><span>↻</span><span><strong>Rutinas</strong><small>Plantillas y tareas recurrentes</small></span><b>›</b></button>
+        <button type="button" data-more-view="history"><span>◷</span><span><strong>Actividad</strong><small>Historial y estadísticas</small></span><b>›</b></button>
+        <button type="button" data-more-view="settings"><span>⚙</span><span><strong>Ajustes</strong><small>Personas, sincronización y configuración</small></span><b>›</b></button>
+      </div>
+      <p class="more-nav-note">El mapa de la vivienda permanece siempre en <strong>Hoy</strong>.</p>
+    </div>
+  </dialog>
+
+  <dialog id="syncOverviewDialog" class="ux-sheet-dialog sync-overview-dialog" aria-labelledby="syncOverviewTitle">
+    <div class="ux-sheet-card">
+      <div class="ux-sheet-header">
+        <div><p class="eyebrow">Estado global</p><h2 id="syncOverviewTitle">Sincronización</h2></div>
+        <button id="closeSyncOverviewDialog" class="icon-button" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="sync-overview-summary"><span id="syncOverviewPill" class="sync-overview-pill">Comprobando</span><p id="syncOverviewText">Estado del núcleo y de Comidas.</p></div>
+      <div class="sync-overview-list">
+        <div class="sync-overview-row"><span class="sync-overview-icon">⌂</span><span><strong>HomeTasks</strong><small id="coreSyncTime">Nunca sincronizado</small></span><b id="coreSyncState">—</b></div>
+        <div class="sync-overview-row"><span class="sync-overview-icon">🍽</span><span><strong>Comidas</strong><small id="nutritionSyncTime">Nunca sincronizado</small></span><b id="nutritionSyncState">—</b></div>
+      </div>
+      <div class="sync-overview-actions">
+        <button id="globalSyncNowButton" class="primary-button" type="button">Sincronizar ahora</button>
+        <button id="openSyncSettingsButton" class="secondary-button" type="button">Abrir ajustes</button>
       </div>
     </div>
   </dialog>

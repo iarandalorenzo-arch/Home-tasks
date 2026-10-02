@@ -9,7 +9,7 @@ import {
   NUTRITION_DATA_STORES,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '11-D3';
+const NUTRITION_VERSION = '12-A1';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -20,6 +20,7 @@ const LS_DEVICE_ID = 'hometasks-device-id';
 const LS_NUTRITION_SYNC_DIRTY = 'hometasks-nutrition-sync-dirty';
 const LS_NUTRITION_SYNC_REVISION = 'hometasks-nutrition-sync-revision';
 const LS_NUTRITION_LAST_SYNC = 'hometasks-nutrition-sync-last';
+const LS_NUTRITION_SYNC_ERROR = 'hometasks-nutrition-sync-error';
 const ASSISTANT_ENGINE = 'local-v2';
 const ASSISTANT_MAX_FOODS = 14;
 const ASSISTANT_MAX_ITEMS_PER_MEAL = 3;
@@ -135,9 +136,25 @@ function bumpNutritionSyncRevision() {
   return next;
 }
 
+function emitNutritionSyncState(errorOverride = null) {
+  if (errorOverride !== null) {
+    if (errorOverride) localStorage.setItem(LS_NUTRITION_SYNC_ERROR, String(errorOverride));
+    else localStorage.removeItem(LS_NUTRITION_SYNC_ERROR);
+  }
+  window.dispatchEvent(new CustomEvent('hometasks:nutrition-sync-state', {
+    detail: {
+      busy: state.nutritionSyncBusy,
+      error: localStorage.getItem(LS_NUTRITION_SYNC_ERROR) || '',
+      dirty: localStorage.getItem(LS_NUTRITION_SYNC_DIRTY) === '1',
+      lastSync: localStorage.getItem(LS_NUTRITION_LAST_SYNC),
+    },
+  }));
+}
+
 function markNutritionDirty() {
   localStorage.setItem(LS_NUTRITION_SYNC_DIRTY, '1');
   bumpNutritionSyncRevision();
+  emitNutritionSyncState();
 }
 
 function nutritionSyncAvailable() {
@@ -296,6 +313,7 @@ async function nutritionSyncNow({ silent = true } = {}) {
     return false;
   }
   state.nutritionSyncBusy = true;
+  emitNutritionSyncState('');
   const revisionAtStart = nutritionSyncRevision();
   const dirtyAtStart = localStorage.getItem(LS_NUTRITION_SYNC_DIRTY) === '1' || !localStorage.getItem(LS_NUTRITION_LAST_SYNC);
   try {
@@ -324,6 +342,7 @@ async function nutritionSyncNow({ silent = true } = {}) {
     if (stable) localStorage.setItem(LS_NUTRITION_SYNC_DIRTY, '0');
     else localStorage.setItem(LS_NUTRITION_SYNC_DIRTY, '1');
     localStorage.setItem(LS_NUTRITION_LAST_SYNC, String(Date.now()));
+    localStorage.removeItem(LS_NUTRITION_SYNC_ERROR);
     await loadNutritionState({ refreshUsers: false });
     renderAllNutrition();
     if (!silent) showToast('Comidas sincronizadas');
@@ -331,11 +350,13 @@ async function nutritionSyncNow({ silent = true } = {}) {
     return true;
   } catch (error) {
     localStorage.setItem(LS_NUTRITION_SYNC_DIRTY, '1');
+    localStorage.setItem(LS_NUTRITION_SYNC_ERROR, String(error?.message || 'Error de sincronizaci\u00f3n'));
     console.warn('No se pudo sincronizar Comidas:', error);
     if (!silent) showToast('No se pudo sincronizar Comidas');
     return false;
   } finally {
     state.nutritionSyncBusy = false;
+    emitNutritionSyncState();
     if (state.nutritionSyncQueued) {
       state.nutritionSyncQueued = false;
       scheduleNutritionSync(500);
@@ -1850,6 +1871,18 @@ function setupEvents() {
   els.closeCopyWeekDialog.addEventListener('click', () => els.copyWeekDialog.close());
   els.cancelCopyWeekDialog.addEventListener('click', () => els.copyWeekDialog.close());
 
+  window.addEventListener('hometasks:quick-action', event => {
+    const action = event?.detail?.action;
+    if (action === 'food') {
+      setMode('foods');
+      openFoodDialog();
+      return;
+    }
+    if (action === 'meal') {
+      setMode('day');
+      openEntryDialog(null, state.mealTypes[0]?.id || '');
+    }
+  });
   window.addEventListener('hometasks:nutrition-changed', () => {
     markNutritionDirty();
     scheduleNutritionSync(1400);
@@ -1878,6 +1911,7 @@ async function initNutrition() {
   renderAllNutrition();
   document.documentElement.dataset.nutritionVersion = NUTRITION_VERSION;
   if (!localStorage.getItem(LS_NUTRITION_LAST_SYNC)) localStorage.setItem(LS_NUTRITION_SYNC_DIRTY, '1');
+  emitNutritionSyncState();
   if (localStorage.getItem(LS_AUTO_SYNC) === '1') scheduleNutritionSync(2600);
 }
 

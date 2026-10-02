@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hometasks-v11-d3';
+const CACHE_NAME = 'hometasks-v12-a1';
 const APP_SHELL = [
   './',
   './index.html',
