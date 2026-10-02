@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V11-D2</title>
+  <title>HomeTasks V11-D3</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -22,7 +22,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V11-D2 · tareas + plan de comidas + asistente local</p>
+          <p class="subtitle">V11-D3 · tareas + plan de comidas + asistente local</p>
         </div>
       </div>
       <div class="top-actions">
@@ -326,7 +326,7 @@
           <div>
             <p class="eyebrow">Plan de comidas · sincronización independiente</p>
             <h2 id="mealsTitle">Comidas</h2>
-            <p class="section-note">Planifica por persona y calcula calorías y macronutrientes. V11-D2 mantiene el asistente local y añade reglas de ración, compatibilidad por comida, variedad y sustituciones.</p>
+            <p class="section-note">Planifica por persona y calcula calorías y macronutrientes. V11-D3 mantiene el asistente local y añade reglas de ración, compatibilidad por comida, variedad y sustituciones.</p>
           </div>
           <button id="nutritionChatButton" class="secondary-button nutrition-chat-button" type="button" title="Abrir el asistente nutricional local">✨ Asistente nutricional <small>Local</small></button>
         </div>
@@ -446,11 +446,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V11-D2</h3>
+            <h3>Estado de V11-D3</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Versión</span><strong>V11-D2</strong></div>
+            <div class="setting-row"><span>Versión</span><strong>V11-D3</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -590,14 +590,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V11-D2. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-D2</button>
+            <p>Restablece HomeTasks a los datos iniciales de V11-D3. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-D3</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-D2</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-D3</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -884,7 +884,7 @@
         <label><span>Carbohidratos / 100 g</span><input id="foodCarbs" type="number" min="0" step="0.1" inputmode="decimal" required /></label>
         <label><span>Grasa / 100 g</span><input id="foodFat" type="number" min="0" step="0.1" inputmode="decimal" required /></label>
         <label><span>Fibra / 100 g <small>(opcional)</small></span><input id="foodFiber" type="number" min="0" step="0.1" inputmode="decimal" /></label>
-        <label><span>Origen</span><select id="foodSource"><option>Manual</option><option>Etiqueta nutricional</option><option value="Gemini">Gemini (legacy)</option><option value="ChatGPT">ChatGPT (legacy)</option></select></label>
+        <label><span>Origen</span><select id="foodSource"><option>Manual</option><option>Etiqueta nutricional</option><option>Importado</option></select></label>
         <div class="form-section-title full-width">Reglas del asistente local <small>(opcionales)</small></div>
         <label><span>Categoría</span><select id="foodPlanningCategory"><option value="auto">Automática</option><option value="protein">Proteína</option><option value="carb">Carbohidrato</option><option value="fat">Grasa</option><option value="fruit">Fruta</option><option value="vegetable">Verdura</option><option value="dairy">Lácteo</option><option value="mixed">Mixto</option><option value="other">Otro</option></select></label>
         <label class="checkbox-field"><span>Planificación</span><span class="checkbox-line"><input id="foodAssistantEnabled" type="checkbox" checked><span>Usar este alimento en planes automáticos</span></span></label>
@@ -977,45 +977,59 @@
 
   <dialog id="nutritionChatDialog" class="task-dialog nutrition-chat-dialog">
     <div class="nutrition-chat-shell">
-      <div class="dialog-header nutrition-chat-header">
-        <div>
-          <p class="eyebrow">Comidas · asistente local</p>
-          <h2>✨ Asistente nutricional</h2>
-          <p id="nutritionChatContextLabel" class="nutrition-chat-context-label">—</p>
+      <header class="nutrition-chat-header">
+        <div class="nutrition-assistant-heading">
+          <div class="nutrition-assistant-mark" aria-hidden="true">✦</div>
+          <div class="nutrition-assistant-title">
+            <p class="eyebrow">Comidas</p>
+            <h2>Asistente nutricional</h2>
+            <p id="nutritionChatContextLabel" class="nutrition-chat-context-label">—</p>
+          </div>
         </div>
-        <button id="closeNutritionChat" class="icon-button" type="button" aria-label="Cerrar">×</button>
+        <div class="nutrition-chat-header-actions">
+          <span id="nutritionChatStatus" class="nutrition-chat-status ready"><span class="nutrition-chat-status-dot" aria-hidden="true"></span><span>Local</span></span>
+          <button id="clearNutritionChat" class="nutrition-chat-header-button" type="button" title="Nueva conversación" aria-label="Nueva conversación">↻</button>
+          <button id="closeNutritionChat" class="nutrition-chat-header-button close" type="button" title="Cerrar" aria-label="Cerrar">×</button>
+        </div>
+      </header>
+
+      <div class="nutrition-assistant-layout">
+        <aside class="nutrition-assistant-sidebar" aria-label="Accesos rápidos del asistente">
+          <div class="nutrition-assistant-sidebar-heading">
+            <strong>Accesos rápidos</strong>
+            <span>Elige una consulta habitual</span>
+          </div>
+          <div class="nutrition-chat-suggestions">
+            <button type="button" data-chat-prompt="Cómo voy hoy"><span aria-hidden="true">◎</span><span>Cómo voy</span></button>
+            <button type="button" data-chat-prompt="Qué me falta"><span aria-hidden="true">△</span><span>Qué falta</span></button>
+            <button type="button" data-chat-prompt="Proponer próxima comida"><span aria-hidden="true">＋</span><span>Próxima comida</span></button>
+            <button type="button" data-chat-prompt="Planifica el resto del día"><span aria-hidden="true">↗</span><span>Resto del día</span></button>
+            <button type="button" data-chat-prompt="Hazme un plan del día"><span aria-hidden="true">▦</span><span>Plan del día</span></button>
+            <button type="button" data-chat-prompt="Revisa mi semana"><span aria-hidden="true">◫</span><span>Semana</span></button>
+            <button type="button" data-chat-prompt="Sustituye 100 g de " data-chat-fill-only="true"><span aria-hidden="true">⇄</span><span>Sustituir</span></button>
+          </div>
+        </aside>
+
+        <section class="nutrition-assistant-main">
+          <div id="nutritionChatMessages" class="nutrition-chat-messages" role="log" aria-live="polite"></div>
+
+          <form id="nutritionChatForm" class="nutrition-chat-compose">
+            <label class="sr-only" for="nutritionChatInput">Mensaje para el asistente nutricional</label>
+            <div class="nutrition-chat-compose-field">
+              <textarea id="nutritionChatInput" rows="1" maxlength="1800" placeholder="Pregunta o pide un plan…" required></textarea>
+              <button id="nutritionChatSend" class="primary-button nutrition-chat-send" type="submit" aria-label="Enviar mensaje">
+                <span class="nutrition-chat-send-label">Enviar</span><span class="nutrition-chat-send-icon" aria-hidden="true">↑</span>
+              </button>
+            </div>
+            <div class="nutrition-chat-compose-meta"><span>Enter para enviar</span><span>Mayús + Enter para nueva línea</span></div>
+          </form>
+
+          <details class="nutrition-chat-note">
+            <summary>Sobre los cálculos</summary>
+            <p>El asistente trabaja con los objetivos que has configurado, tu menú y tu biblioteca de alimentos. Respeta las reglas de ración y comidas permitidas de cada alimento. Las propuestas son orientativas y no sustituyen consejo médico o dietético profesional.</p>
+          </details>
+        </section>
       </div>
-
-      <div class="nutrition-chat-status-row">
-        <span id="nutritionChatStatus" class="nutrition-chat-status ready">Asistente local disponible</span>
-        <span id="nutritionChatModel" class="nutrition-chat-model"></span>
-        <button id="clearNutritionChat" class="secondary-button compact-button" type="button">Nuevo chat</button>
-      </div>
-
-      <div id="nutritionChatSetup" class="nutrition-chat-setup" hidden>
-        <strong>Asistente local de HomeTasks</strong>
-        <p id="nutritionChatSetupText">No necesita ninguna API externa.</p>
-        <button id="nutritionChatSettingsButton" class="secondary-button compact-button" type="button">Abrir Ajustes</button>
-      </div>
-
-      <div id="nutritionChatMessages" class="nutrition-chat-messages" role="log" aria-live="polite"></div>
-
-      <div class="nutrition-chat-suggestions" aria-label="Preguntas rápidas">
-        <button type="button" data-chat-prompt="Cómo voy hoy">Cómo voy hoy</button>
-        <button type="button" data-chat-prompt="Qué me falta">Qué me falta</button>
-        <button type="button" data-chat-prompt="Proponer próxima comida">Próxima comida</button>
-        <button type="button" data-chat-prompt="Planifica el resto del día">Planificar resto</button>
-        <button type="button" data-chat-prompt="Hazme un plan del día">Plan del día</button>
-        <button type="button" data-chat-prompt="Revisa mi semana">Revisar semana</button>
-        <button type="button" data-chat-prompt="Sustituye 100 g de ">Buscar sustituto</button>
-      </div>
-
-      <form id="nutritionChatForm" class="nutrition-chat-compose">
-        <label class="sr-only" for="nutritionChatInput">Mensaje para el asistente local</label>
-        <textarea id="nutritionChatInput" rows="2" maxlength="1800" placeholder="Ej. Hazme un plan del día para llegar a mis objetivos…" required></textarea>
-        <button id="nutritionChatSend" class="primary-button" type="submit">Enviar</button>
-      </form>
-      <p class="nutrition-chat-note">El cálculo del asistente se ejecuta completamente en local y no envía datos a ningún servicio de IA. Si tienes activa la sincronización de HomeTasks, el historial del asistente se sincroniza con tu almacenamiento de HomeTasks igual que el resto de datos de Comidas. Usa únicamente los objetivos que tú hayas configurado y los valores de tu biblioteca. En V11-D2 el optimizador respeta las reglas de ración y comidas permitidas que configures en cada alimento. Sus propuestas son cálculos orientativos y no sustituyen consejo médico o dietético profesional.</p>
     </div>
   </dialog>
 

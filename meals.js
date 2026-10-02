@@ -9,7 +9,7 @@ import {
   NUTRITION_DATA_STORES,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '11-D2';
+const NUTRITION_VERSION = '11-D3';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -27,6 +27,9 @@ const FOOD_CATEGORY_LABELS = {
   auto: 'Automática', protein: 'Proteína', carb: 'Carbohidrato', fat: 'Grasa',
   fruit: 'Fruta', vegetable: 'Verdura', dairy: 'Lácteo', mixed: 'Mixto', other: 'Otro',
 };
+const FOOD_SOURCE_VALUES = new Set(['Manual', 'Etiqueta nutricional', 'Importado']);
+const normalizeFoodSource = value => FOOD_SOURCE_VALUES.has(String(value || '')) ? String(value) : 'Importado';
+
 const DEFAULT_MEAL_TYPES = [
   { id: 'breakfast', name: 'Desayuno', order: 10, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
   { id: 'lunch', name: 'Comida', order: 20, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
@@ -85,8 +88,6 @@ const state = {
   copyWeekDestinationStart: '',
   chatMessages: [],
   chatBusy: false,
-  chatBackendReady: false,
-  chatBackendModel: '',
   nutritionSyncBusy: false,
   nutritionSyncQueued: false,
 };
@@ -106,8 +107,8 @@ function cacheElements() {
     'mealTypesDialog','mealTypeManagerList','newMealTypeButton','closeMealTypesDialog','closeMealTypesDialogFooter',
     'mealTypeNameDialog','mealTypeNameForm','mealTypeNameDialogTitle','mealTypeNameInput','closeMealTypeNameDialog','cancelMealTypeNameDialog',
     'copyWeekDialog','copyWeekForm','copyWeekSourceLabel','copyWeekDestinationLabel','copyWeekWarning','closeCopyWeekDialog','cancelCopyWeekDialog',
-    'nutritionChatDialog','nutritionChatContextLabel','nutritionChatStatus','nutritionChatModel','nutritionChatSetup','nutritionChatSetupText','nutritionChatMessages',
-    'nutritionChatForm','nutritionChatInput','nutritionChatSend','closeNutritionChat','clearNutritionChat','nutritionChatSettingsButton'
+    'nutritionChatDialog','nutritionChatContextLabel','nutritionChatStatus','nutritionChatMessages',
+    'nutritionChatForm','nutritionChatInput','nutritionChatSend','closeNutritionChat','clearNutritionChat'
   ].forEach(id => { els[id] = document.getElementById(id); });
 }
 
@@ -140,7 +141,7 @@ function markNutritionDirty() {
 }
 
 function nutritionSyncAvailable() {
-  const { endpoint, houseKey } = chatBackendConfig();
+  const { endpoint, houseKey } = nutritionSyncConfig();
   return Boolean(endpoint && houseKey && localStorage.getItem(LS_CLOUD_LINKED) === '1');
 }
 
@@ -272,7 +273,7 @@ async function applyNutritionSnapshot(snapshot) {
 }
 
 async function nutritionBackendPost(payload, timeoutMs = 65000) {
-  const { endpoint, houseKey } = chatBackendConfig();
+  const { endpoint, houseKey } = nutritionSyncConfig();
   if (!endpoint || !houseKey) throw new Error('Configura primero Apps Script en Ajustes.');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -299,7 +300,7 @@ async function nutritionSyncNow({ silent = true } = {}) {
   const dirtyAtStart = localStorage.getItem(LS_NUTRITION_SYNC_DIRTY) === '1' || !localStorage.getItem(LS_NUTRITION_LAST_SYNC);
   try {
     const local = await buildNutritionSnapshot();
-    const pulled = await chatJsonpRequest('nutrition_sync_pull', {}, 32000);
+    const pulled = await nutritionSyncJsonpRequest('nutrition_sync_pull', {}, 32000);
     if (!pulled?.ok) throw new Error(pulled?.message || pulled?.error || 'No se pudo descargar Comidas.');
     const remote = pulled.snapshot ? validateNutritionSnapshot(pulled.snapshot) : null;
     let merged = remote ? mergeNutritionSnapshots(local, remote) : local;
@@ -311,7 +312,7 @@ async function nutritionSyncNow({ silent = true } = {}) {
       if (changedDuringPull) merged = remote ? mergeNutritionSnapshots(latestLocal, merged) : mergeNutritionSnapshots(latestLocal, merged);
       await nutritionBackendPost({ action: 'nutrition_sync_push', snapshot: merged });
       await new Promise(resolve => setTimeout(resolve, 900));
-      const confirmedPayload = await chatJsonpRequest('nutrition_sync_pull', {}, 32000);
+      const confirmedPayload = await nutritionSyncJsonpRequest('nutrition_sync_pull', {}, 32000);
       if (!confirmedPayload?.ok) throw new Error(confirmedPayload?.message || confirmedPayload?.error || 'Apps Script no confirmó Comidas.');
       if (confirmedPayload.snapshot) {
         merged = mergeNutritionSnapshots(merged, validateNutritionSnapshot(confirmedPayload.snapshot));
@@ -607,7 +608,7 @@ function renderFoods() {
       ? 'No usar en planes automáticos'
       : `${category} · ${usual ? `ración ${formatNumber(usual,0)} g` : 'ración automática'} · ${foodMealRuleLabel(food)}`;
     return `<article class="card meal-library-row" data-food-id="${escapeHTML(food.id)}">
-      <div class="meal-library-name"><strong>${escapeHTML(food.name)}</strong><small>${escapeHTML(food.source || 'Manual')} · valores por 100 g</small><small class="meal-library-planning">${escapeHTML(planning)}</small></div>
+      <div class="meal-library-name"><strong>${escapeHTML(food.name)}</strong><small>${escapeHTML(normalizeFoodSource(food.source))} · valores por 100 g</small><small class="meal-library-planning">${escapeHTML(planning)}</small></div>
       <div class="meal-library-kcal">${formatKcal(food.kcal)}</div>
       <div class="meal-library-macros">P ${formatNumber(food.protein,1)} · C ${formatNumber(food.carbs,1)} · G ${formatNumber(food.fat,1)}${safeNumber(food.fiber) ? ` · Fibra ${formatNumber(food.fiber,1)}` : ''}</div>
       <div class="meal-library-actions">
@@ -697,7 +698,7 @@ function openFoodDialog(foodId = null) {
   els.foodCarbs.value = food?.carbs ?? '';
   els.foodFat.value = food?.fat ?? '';
   els.foodFiber.value = food?.fiber ?? '';
-  els.foodSource.value = food?.source || 'Manual';
+  els.foodSource.value = normalizeFoodSource(food?.source || 'Manual');
   els.foodPlanningCategory.value = FOOD_CATEGORY_LABELS[food?.planningCategory] ? food.planningCategory : 'auto';
   els.foodServingUsual.value = positiveNumber(food?.servingUsual) ?? '';
   els.foodServingMin.value = positiveNumber(food?.servingMin) ?? '';
@@ -845,7 +846,7 @@ async function saveEntry(event) {
       carbs: safeNumber(food.carbs),
       fat: safeNumber(food.fat),
       fiber: safeNumber(food.fiber),
-      source: food.source || 'Manual',
+      source: normalizeFoodSource(food.source),
     },
     quantityGrams: quantity,
     createdAt: previous?.createdAt || now,
@@ -1073,7 +1074,7 @@ async function copyPreviousWeek(event) {
 }
 
 
-function chatBackendConfig() {
+function nutritionSyncConfig() {
   const endpoint = String(localStorage.getItem(LS_SYNC_ENDPOINT) || '').trim().replace(/\/$/, '');
   const houseKey = String(localStorage.getItem(LS_SYNC_HOUSE_KEY) || '');
   if (!endpoint || !houseKey) return { endpoint: '', houseKey: '' };
@@ -1084,11 +1085,11 @@ function chatBackendConfig() {
   return { endpoint, houseKey };
 }
 
-function chatJsonpRequest(action, params = {}, timeoutMs = 25000) {
-  const { endpoint, houseKey } = chatBackendConfig();
+function nutritionSyncJsonpRequest(action, params = {}, timeoutMs = 25000) {
+  const { endpoint, houseKey } = nutritionSyncConfig();
   if (!endpoint || !houseKey) return Promise.reject(new Error('Configura primero Apps Script en Ajustes.'));
   return new Promise((resolve, reject) => {
-    const callback = `__ht_ai_${Date.now()}_${Math.random().toString(16).slice(2)}`.replace(/[^A-Za-z0-9_$]/g, '_');
+    const callback = `__ht_nutrition_sync_${Date.now()}_${Math.random().toString(16).slice(2)}`.replace(/[^A-Za-z0-9_$]/g, '_');
     const url = new URL(endpoint);
     url.searchParams.set('action', action);
     url.searchParams.set('key', houseKey);
@@ -1112,11 +1113,10 @@ function chatJsonpRequest(action, params = {}, timeoutMs = 25000) {
   });
 }
 
-function setChatStatus(kind, text, detail = '') {
+function setChatStatus(kind, text) {
   if (!els.nutritionChatStatus) return;
   els.nutritionChatStatus.className = `nutrition-chat-status ${kind}`;
-  els.nutritionChatStatus.textContent = text;
-  els.nutritionChatModel.textContent = detail || '';
+  els.nutritionChatStatus.innerHTML = `<span class="nutrition-chat-status-dot" aria-hidden="true"></span><span>${escapeHTML(text)}</span>`;
 }
 
 function chatMessagesForPerson(personId = state.selectedPersonId) {
@@ -1629,18 +1629,18 @@ function localAssistantAnswer(text) {
   if (/(que me falta|qué me falta|cuanto me falta|cuánto me falta|restante|restantes)/.test(normalized)) return { text: missingGoalsText() };
   if (/(como voy|cómo voy|analiza|analisis|análisis|balance|resumen.*dia|estado.*dia)/.test(normalized)) return { text: dayAnalysisText() };
   if (/^(ayuda|help|que puedes hacer|qué puedes hacer)/.test(normalized)) return { text: assistantHelpText() };
-  return { text: `No necesito Internet, pero tampoco interpreto preguntas abiertas como una IA. Puedo ayudarte con comandos concretos:\n\n- “Cómo voy hoy”\n- “Qué me falta”\n- “Hazme un plan del día”\n- “Planifica el resto del día”\n- “Sugiere una cena”\n- “Revisa mi semana”\n- “Qué pasa si añado 150 g de [alimento]”\n\nTambién puedes usar los botones rápidos de abajo.` };
+  return { text: `Puedo ayudarte con un conjunto concreto de consultas sobre tus objetivos, tu menú y tus alimentos guardados:\n\n- “Cómo voy hoy”\n- “Qué me falta”\n- “Hazme un plan del día”\n- “Planifica el resto del día”\n- “Sugiere una cena”\n- “Revisa mi semana”\n- “Qué pasa si añado 150 g de [alimento]”\n\nTambién puedes usar los botones rápidos de abajo.` };
 }
 
 function assistantHelpText() {
-  return 'El asistente local usa únicamente tus objetivos, tu menú y los alimentos guardados. Puede analizar el día, calcular lo que falta, proponer una comida, planificar el resto del día, construir un plan completo cuando el día está vacío, revisar la semana, simular cantidades y buscar sustituciones aproximadas. En V11-D2 también respeta raciones, categorías y comidas permitidas configuradas por alimento. No calcula cuáles deberían ser tus objetivos ni usa servicios externos.';
+  return 'El asistente local usa únicamente tus objetivos, tu menú y los alimentos guardados. Puede analizar el día, calcular lo que falta, proponer una comida, planificar el resto del día, construir un plan completo cuando el día está vacío, revisar la semana, simular cantidades y buscar sustituciones aproximadas. También respeta raciones, categorías y comidas permitidas configuradas por alimento. No calcula cuáles deberían ser tus objetivos.';
 }
 
 function renderChatMessages() {
   if (!els.nutritionChatMessages) return;
   const messages = chatMessagesForPerson();
   if (!messages.length) {
-    els.nutritionChatMessages.innerHTML = `<div class="nutrition-chat-welcome"><strong>Asistente nutricional local</strong><span>Funciona sin Internet y utiliza solo tus objetivos, tu menú y la biblioteca de alimentos. V11-D2 puede respetar raciones y comidas permitidas. Prueba “Hazme un plan del día” o usa los botones rápidos.</span></div>`;
+    els.nutritionChatMessages.innerHTML = `<div class="nutrition-chat-welcome"><div class="nutrition-chat-welcome-mark" aria-hidden="true">✦</div><div class="nutrition-chat-welcome-copy"><strong>¿Qué quieres planificar?</strong><span>Consulta tu balance, calcula lo que te falta o pide una propuesta usando tus objetivos y los alimentos de tu biblioteca.</span></div></div>`;
   } else {
     els.nutritionChatMessages.innerHTML = messages.map(message => {
       const planAction = message.role === 'assistant' && message.plan?.items?.length
@@ -1648,10 +1648,13 @@ function renderChatMessages() {
           ? '<span class="assistant-plan-applied">✓ Propuesta añadida al menú</span>'
           : `<button class="primary-button compact-button assistant-plan-apply" type="button" data-assistant-plan-id="${escapeHTML(message.id)}">Añadir propuesta al menú</button>`}</div>`
         : '';
-      return `<div class="nutrition-chat-message ${message.role}"><div>${escapeHTML(message.text).replace(/\n/g, '<br>')}</div>${planAction}<small>${new Date(message.createdAt).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</small></div>`;
+      const content = `<div class="nutrition-chat-message ${message.role}"><div class="nutrition-chat-message-content">${escapeHTML(message.text).replace(/\n/g, '<br>')}</div>${planAction}<small>${new Date(message.createdAt).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</small></div>`;
+      return message.role === 'assistant'
+        ? `<div class="nutrition-chat-message-row assistant"><div class="nutrition-chat-avatar" aria-hidden="true">✦</div>${content}</div>`
+        : `<div class="nutrition-chat-message-row user">${content}</div>`;
     }).join('');
   }
-  if (state.chatBusy) els.nutritionChatMessages.insertAdjacentHTML('beforeend', '<div class="nutrition-chat-message assistant pending">Calculando con tus datos…</div>');
+  if (state.chatBusy) els.nutritionChatMessages.insertAdjacentHTML('beforeend', '<div class="nutrition-chat-message-row assistant"><div class="nutrition-chat-avatar" aria-hidden="true">✦</div><div class="nutrition-chat-message assistant pending">Calculando con tus datos…</div></div>');
   els.nutritionChatMessages.querySelectorAll('[data-assistant-plan-id]').forEach(button => button.addEventListener('click', () => applyAssistantPlan(button.dataset.assistantPlanId).catch(console.error)));
   els.nutritionChatMessages.scrollTop = els.nutritionChatMessages.scrollHeight;
   els.clearNutritionChat.disabled = !messages.length || state.chatBusy;
@@ -1662,11 +1665,8 @@ function renderChatContextLabel() {
   if (els.nutritionChatContextLabel) els.nutritionChatContextLabel.textContent = `${user?.name || 'Sin persona'} · ${formatDateLong(state.selectedDate)}`;
 }
 
-async function refreshChatBackendStatus() {
-  state.chatBackendReady = true;
-  state.chatBackendModel = ASSISTANT_ENGINE;
-  setChatStatus('ready', 'Asistente local disponible', 'Sin API · funciona offline');
-  if (els.nutritionChatSetup) els.nutritionChatSetup.hidden = true;
+async function refreshAssistantStatus() {
+  setChatStatus('ready', 'Local');
   return true;
 }
 
@@ -1675,9 +1675,10 @@ async function openNutritionChat() {
   renderChatContextLabel();
   renderChatMessages();
   els.nutritionChatInput.value = '';
+  resizeNutritionChatInput();
   els.nutritionChatDialog.showModal();
   setTimeout(() => els.nutritionChatInput.focus(), 40);
-  await refreshChatBackendStatus();
+  await refreshAssistantStatus();
 }
 
 async function sendNutritionChat(event) {
@@ -1691,7 +1692,9 @@ async function sendNutritionChat(event) {
   await nutritionPut('chatMessages', userMessage);
   state.chatMessages.push(userMessage);
   els.nutritionChatInput.value = '';
+  resizeNutritionChatInput();
   state.chatBusy = true;
+  setChatStatus('checking', 'Calculando');
   els.nutritionChatSend.disabled = true;
   renderChatMessages();
 
@@ -1707,11 +1710,11 @@ async function sendNutritionChat(event) {
     };
     await nutritionPut('chatMessages', assistantMessage);
     state.chatMessages.push(assistantMessage);
-    setChatStatus('ready', 'Asistente local disponible', 'Sin API · funciona offline');
+    setChatStatus('ready', 'Local');
   } catch (error) {
     console.error('Asistente nutricional:', error);
     showToast(error?.message || 'No se pudo calcular la respuesta');
-    setChatStatus('error', 'Error en el cálculo local', ASSISTANT_ENGINE);
+    setChatStatus('error', 'Error');
   } finally {
     state.chatBusy = false;
     els.nutritionChatSend.disabled = false;
@@ -1757,6 +1760,12 @@ async function clearNutritionChatHistory() {
   showToast('Asistente reiniciado');
 }
 
+function resizeNutritionChatInput() {
+  if (!els.nutritionChatInput) return;
+  els.nutritionChatInput.style.height = 'auto';
+  els.nutritionChatInput.style.height = `${Math.min(118, Math.max(42, els.nutritionChatInput.scrollHeight))}px`;
+}
+
 async function refreshForMealsView() {
   await loadNutritionState({ refreshUsers: true });
   renderAllNutrition();
@@ -1786,14 +1795,17 @@ function setupEvents() {
   els.nutritionChatForm.addEventListener('submit', sendNutritionChat);
   els.closeNutritionChat.addEventListener('click', () => els.nutritionChatDialog.close());
   els.clearNutritionChat.addEventListener('click', () => clearNutritionChatHistory().catch(console.error));
-  els.nutritionChatSettingsButton?.addEventListener('click', () => {
-    els.nutritionChatDialog.close();
-    document.querySelector('[data-view="settings"]')?.click();
-  });
   document.querySelectorAll('[data-chat-prompt]').forEach(button => button.addEventListener('click', () => {
     els.nutritionChatInput.value = button.dataset.chatPrompt || '';
-    els.nutritionChatInput.focus();
+    resizeNutritionChatInput();
+    if (button.dataset.chatFillOnly === 'true') {
+      els.nutritionChatInput.focus();
+      els.nutritionChatInput.setSelectionRange(els.nutritionChatInput.value.length, els.nutritionChatInput.value.length);
+      return;
+    }
+    els.nutritionChatForm.requestSubmit();
   }));
+  els.nutritionChatInput.addEventListener('input', resizeNutritionChatInput);
   els.nutritionChatInput.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
