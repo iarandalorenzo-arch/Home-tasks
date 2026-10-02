@@ -1599,7 +1599,7 @@ html.tablet-ui .meal-week-open small { font-size: 8px; }
 }
 
 
-/* V11-C - ChatGPT nutricional contextual. */
+/* V11-C.1 - Gemini nutricional contextual. */
 .nutrition-chat-dialog { width: min(820px, calc(100% - 22px)); max-height: min(88vh, 820px); padding: 0; overflow: hidden; }
 .nutrition-chat-dialog::backdrop { background: rgba(7,12,20,.56); backdrop-filter: blur(2px); }
 .nutrition-chat-shell { display: grid; grid-template-rows: auto auto auto minmax(210px,1fr) auto auto auto; gap: 10px; max-height: min(88vh, 820px); padding: 16px; }

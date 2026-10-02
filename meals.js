@@ -7,7 +7,7 @@ import {
   resetNutritionDatabase,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '11-C';
+const NUTRITION_VERSION = '11-C.1';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -787,7 +787,7 @@ async function chatPost(payload, timeoutMs = 95000) {
       signal: controller.signal,
     });
   } catch (error) {
-    if (error?.name === 'AbortError') throw new Error('ChatGPT está tardando demasiado en responder.');
+    if (error?.name === 'AbortError') throw new Error('Gemini está tardando demasiado en responder.');
     throw new Error('No se ha podido enviar la consulta a Apps Script.');
   } finally { clearTimeout(timer); }
 }
@@ -842,11 +842,11 @@ function renderChatMessages() {
   if (!els.nutritionChatMessages) return;
   const messages = chatMessagesForPerson();
   if (!messages.length) {
-    els.nutritionChatMessages.innerHTML = `<div class="nutrition-chat-welcome"><strong>ChatGPT puede leer el contexto de Comidas.</strong><span>Pregúntale por el menú del ${escapeHTML(formatDateLong(state.selectedDate))}, tus objetivos, la semana o los alimentos guardados. No modificará datos automáticamente.</span></div>`;
+    els.nutritionChatMessages.innerHTML = `<div class="nutrition-chat-welcome"><strong>Gemini puede leer el contexto de Comidas.</strong><span>Pregúntale por el menú del ${escapeHTML(formatDateLong(state.selectedDate))}, tus objetivos, la semana o los alimentos guardados. No modificará datos automáticamente.</span></div>`;
   } else {
     els.nutritionChatMessages.innerHTML = messages.map(message => `<div class="nutrition-chat-message ${message.role}"><div>${escapeHTML(message.text).replace(/\n/g, '<br>')}</div><small>${new Date(message.createdAt).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</small></div>`).join('');
   }
-  if (state.chatBusy) els.nutritionChatMessages.insertAdjacentHTML('beforeend', '<div class="nutrition-chat-message assistant pending">ChatGPT está preparando la respuesta…</div>');
+  if (state.chatBusy) els.nutritionChatMessages.insertAdjacentHTML('beforeend', '<div class="nutrition-chat-message assistant pending">Gemini está preparando la respuesta…</div>');
   els.nutritionChatMessages.scrollTop = els.nutritionChatMessages.scrollHeight;
   els.clearNutritionChat.disabled = !messages.length || state.chatBusy;
 }
@@ -862,30 +862,30 @@ async function refreshChatBackendStatus() {
     state.chatBackendReady = false;
     setChatStatus('error', 'Sin conexión');
     els.nutritionChatSetup.hidden = false;
-    els.nutritionChatSetupText.textContent = 'El historial local está disponible, pero ChatGPT necesita conexión a Internet.';
+    els.nutritionChatSetupText.textContent = 'El historial local está disponible, pero Gemini necesita conexión a Internet.';
     return false;
   }
   if (!config.endpoint || !config.houseKey) {
     state.chatBackendReady = false;
     setChatStatus('error', 'Apps Script sin configurar');
     els.nutritionChatSetup.hidden = false;
-    els.nutritionChatSetupText.textContent = 'Configura la URL /exec y la clave de la casa en Ajustes. V11-C usa ese mismo backend como proxy seguro.';
+    els.nutritionChatSetupText.textContent = 'Configura la URL /exec y la clave de la casa en Ajustes. V11-C.1 usa ese mismo backend como proxy seguro.';
     return false;
   }
-  setChatStatus('checking', 'Comprobando ChatGPT…');
+  setChatStatus('checking', 'Comprobando Gemini…');
   try {
     const result = await chatJsonpRequest('nutrition_ai_status', {}, 18000);
     state.chatBackendReady = Boolean(result.ok && result.configured);
     state.chatBackendModel = result.model || '';
     if (state.chatBackendReady) {
-      setChatStatus('ready', 'ChatGPT conectado', state.chatBackendModel);
+      setChatStatus('ready', 'Gemini conectado', state.chatBackendModel);
       els.nutritionChatSetup.hidden = true;
       return true;
     }
     const message = result.error === 'unauthorized'
       ? 'La clave de la casa no coincide con el Apps Script desplegado.'
-      : 'Añade OPENAI_API_KEY en Propiedades de secuencia de comandos del proyecto Apps Script y vuelve a desplegar V11-C.';
-    setChatStatus('error', 'ChatGPT sin configurar');
+      : 'Añade GEMINI_API_KEY en Propiedades de script del proyecto Apps Script y vuelve a desplegar V11-C.1.';
+    setChatStatus('error', 'Gemini sin configurar');
     els.nutritionChatSetup.hidden = false;
     els.nutritionChatSetupText.textContent = message;
     return false;
@@ -915,11 +915,11 @@ async function pollChatResult(requestId) {
       await new Promise(resolve => setTimeout(resolve, 900 + attempt * 120));
       continue;
     }
-    if (!result?.ok) throw new Error(result?.message || 'ChatGPT no ha podido responder.');
-    if (!result?.text) throw new Error('ChatGPT ha devuelto una respuesta vacía.');
+    if (!result?.ok) throw new Error(result?.message || 'Gemini no ha podido responder.');
+    if (!result?.text) throw new Error('Gemini ha devuelto una respuesta vacía.');
     return result;
   }
-  throw new Error('No se ha recibido la respuesta de ChatGPT dentro del tiempo esperado.');
+  throw new Error('No se ha recibido la respuesta de Gemini dentro del tiempo esperado.');
 }
 
 async function sendNutritionChat(event) {
@@ -927,7 +927,7 @@ async function sendNutritionChat(event) {
   if (state.chatBusy || !state.selectedPersonId) return;
   const text = String(els.nutritionChatInput.value || '').trim();
   if (!text) return;
-  if (!navigator.onLine) return showToast('ChatGPT necesita conexión a Internet');
+  if (!navigator.onLine) return showToast('Gemini necesita conexión a Internet');
   if (!state.chatBackendReady && !(await refreshChatBackendStatus())) return;
 
   const previous = chatMessagesForPerson().slice(-CHAT_HISTORY_LIMIT).map(item => ({ role: item.role, text: item.text }));
@@ -949,10 +949,10 @@ async function sendNutritionChat(event) {
     await nutritionPut('chatMessages', assistantMessage);
     state.chatMessages.push(assistantMessage);
     state.chatBackendModel = result.model || state.chatBackendModel;
-    setChatStatus('ready', 'ChatGPT conectado', state.chatBackendModel);
+    setChatStatus('ready', 'Gemini conectado', state.chatBackendModel);
   } catch (error) {
     console.error('Chat nutricional:', error);
-    showToast(error?.message || 'No se pudo obtener respuesta de ChatGPT');
+    showToast(error?.message || 'No se pudo obtener respuesta de Gemini');
     setChatStatus('error', 'Error en la última consulta', state.chatBackendModel);
   } finally {
     state.chatBusy = false;
