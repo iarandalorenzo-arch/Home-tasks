@@ -1646,3 +1646,22 @@ html.tablet-ui .meal-week-open small { font-size: 8px; }
 .assistant-plan-actions { margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .assistant-plan-apply { min-height: 32px; padding: 6px 10px; font-size: 9px; }
 .assistant-plan-applied { display: inline-flex; align-items: center; min-height: 27px; padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb,var(--success) 10%,var(--surface-2)); color: var(--success); border: 1px solid color-mix(in srgb,var(--success) 30%,var(--border)); font-size: 9px; font-weight: 800; }
+
+
+/* V11-D2 · reglas de planificación nutricional */
+.food-meal-rule-field { display: grid; gap: 7px; }
+.food-meal-rule-field .field-label { font-size: 11px; font-weight: 800; color: var(--text); }
+.food-meal-rule-field > small { color: var(--muted); line-height: 1.35; }
+.food-meal-compatibility { display: flex; gap: 7px; flex-wrap: wrap; padding: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.food-meal-check { display: inline-flex !important; align-items: center; gap: 5px; min-height: 30px; padding: 4px 8px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; }
+.food-meal-check input { width: 16px; height: 16px; margin: 0; }
+.food-meal-check span { font-size: 10px; font-weight: 750; }
+.checkbox-field { align-content: start; }
+.checkbox-line { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.checkbox-line input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; }
+.checkbox-line span { font-size: 10px; font-weight: 700; line-height: 1.25; }
+.meal-library-planning { display: block; margin-top: 3px; color: var(--accent) !important; font-weight: 700; }
+@media (max-width: 620px) {
+  .food-meal-compatibility { padding: 6px; gap: 5px; }
+  .food-meal-check { min-height: 34px; }
+}

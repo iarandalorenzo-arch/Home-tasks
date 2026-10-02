@@ -9,7 +9,7 @@ import {
   NUTRITION_DATA_STORES,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '11-D';
+const NUTRITION_VERSION = '11-D2';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -20,9 +20,13 @@ const LS_DEVICE_ID = 'hometasks-device-id';
 const LS_NUTRITION_SYNC_DIRTY = 'hometasks-nutrition-sync-dirty';
 const LS_NUTRITION_SYNC_REVISION = 'hometasks-nutrition-sync-revision';
 const LS_NUTRITION_LAST_SYNC = 'hometasks-nutrition-sync-last';
-const ASSISTANT_ENGINE = 'local-v1';
+const ASSISTANT_ENGINE = 'local-v2';
 const ASSISTANT_MAX_FOODS = 14;
 const ASSISTANT_MAX_ITEMS_PER_MEAL = 3;
+const FOOD_CATEGORY_LABELS = {
+  auto: 'Automática', protein: 'Proteína', carb: 'Carbohidrato', fat: 'Grasa',
+  fruit: 'Fruta', vegetable: 'Verdura', dairy: 'Lácteo', mixed: 'Mixto', other: 'Otro',
+};
 const DEFAULT_MEAL_TYPES = [
   { id: 'breakfast', name: 'Desayuno', order: 10, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
   { id: 'lunch', name: 'Comida', order: 20, createdAt: 1, modifiedAt: 1, syncVersion: 1 },
@@ -96,7 +100,7 @@ function cacheElements() {
     'mealPrevDay','mealToday','mealNextDay','mealCopyDayButton','mealMacroGrid','mealDayList','mealEditTargetsButton','manageMealTypesButton',
     'mealWeekLabel','mealWeekGrid','copyPreviousWeekButton','mealFoodSearch','mealFoodList','newFoodButton','nutritionChatButton',
     'nutritionTargetsDialog','nutritionTargetsForm','nutritionTargetsTitle','targetKcal','targetProtein','targetCarbs','targetFat','targetFiber','closeNutritionTargets','cancelNutritionTargets',
-    'foodDialog','foodForm','foodDialogTitle','foodName','foodKcal','foodProtein','foodCarbs','foodFat','foodFiber','foodSource','deleteFoodButton','closeFoodDialog','cancelFoodDialog',
+    'foodDialog','foodForm','foodDialogTitle','foodName','foodKcal','foodProtein','foodCarbs','foodFat','foodFiber','foodSource','foodPlanningCategory','foodServingUsual','foodServingMin','foodServingMax','foodServingStep','foodAssistantEnabled','foodMealCompatibility','deleteFoodButton','closeFoodDialog','cancelFoodDialog',
     'mealEntryDialog','mealEntryForm','mealEntryDialogTitle','mealEntryFood','mealEntryQuantity','mealEntryType','mealEntryPreview','deleteMealEntryButton','closeMealEntryDialog','cancelMealEntryDialog',
     'copyDayDialog','copyDayForm','copyDaySourceLabel','copyDayDestination','closeCopyDayDialog','cancelCopyDayDialog',
     'mealTypesDialog','mealTypeManagerList','newMealTypeButton','closeMealTypesDialog','closeMealTypesDialogFooter',
@@ -533,6 +537,62 @@ function renderWeek() {
   els.mealWeekGrid.querySelectorAll('.meal-week-copy').forEach(button => button.addEventListener('click', () => openCopyDayDialog(button.dataset.date)));
 }
 
+function foodPlanningCategory(food) {
+  const explicit = String(food?.planningCategory || 'auto');
+  if (explicit && explicit !== 'auto' && FOOD_CATEGORY_LABELS[explicit]) return explicit;
+  const protein = safeNumber(food?.protein);
+  const carbs = safeNumber(food?.carbs);
+  const fat = safeNumber(food?.fat);
+  if (protein >= 18 && protein >= carbs * 0.8 && protein >= fat * 2.2) return 'protein';
+  if (carbs >= 20 && carbs >= protein * 1.5 && carbs >= fat * 2.0) return 'carb';
+  if (fat >= 18 && fat >= protein * 0.8 && fat >= carbs * 0.35) return 'fat';
+  return 'mixed';
+}
+
+function planningCategoryLabel(food) {
+  const category = foodPlanningCategory(food);
+  return FOOD_CATEGORY_LABELS[category] || 'Otro';
+}
+
+function foodAllowedForMeal(food, mealTypeId) {
+  if (food?.assistantEnabled === false) return false;
+  const allowed = Array.isArray(food?.allowedMealTypeIds) ? food.allowedMealTypeIds.filter(id => state.mealTypes.some(type => type.id === id)) : [];
+  return !mealTypeId || !allowed.length || allowed.includes(mealTypeId);
+}
+
+function foodMealRuleLabel(food) {
+  if (food?.assistantEnabled === false) return 'Fuera del asistente';
+  const allowed = Array.isArray(food?.allowedMealTypeIds) ? food.allowedMealTypeIds.filter(id => state.mealTypes.some(type => type.id === id)) : [];
+  if (!allowed.length) return 'Todas las comidas';
+  const labels = allowed.map(id => state.mealTypes.find(type => type.id === id)?.name).filter(Boolean);
+  return labels.length ? labels.join(', ') : 'Todas las comidas';
+}
+
+function renderFoodMealCompatibility(food = null) {
+  if (!els.foodMealCompatibility) return;
+  const validAllowed = Array.isArray(food?.allowedMealTypeIds) ? food.allowedMealTypeIds.filter(id => state.mealTypes.some(type => type.id === id)) : [];
+  const restricted = validAllowed.length > 0;
+  const selected = new Set(restricted ? validAllowed : state.mealTypes.map(type => type.id));
+  if (!state.mealTypes.length) {
+    els.foodMealCompatibility.innerHTML = '<span class="muted">No hay tipos de comida configurados.</span>';
+    return;
+  }
+  els.foodMealCompatibility.innerHTML = state.mealTypes.map(type => `
+    <label class="food-meal-check"><input type="checkbox" value="${escapeHTML(type.id)}" ${selected.has(type.id) ? 'checked' : ''}><span>${escapeHTML(type.name)}</span></label>`).join('');
+}
+
+function positiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function positiveOptionalInputValue(element) {
+  const raw = String(element?.value ?? '').trim();
+  if (!raw) return null;
+  const value = Number(raw.replace(',', '.'));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 function renderFoods() {
   const query = String(els.mealFoodSearch.value || '').trim().toLocaleLowerCase('es');
   const foods = state.foods.filter(food => !query || String(food.name || '').toLocaleLowerCase('es').includes(query));
@@ -540,15 +600,22 @@ function renderFoods() {
     els.mealFoodList.innerHTML = `<div class="card meal-library-empty">${state.foods.length ? 'No hay alimentos que coincidan con la búsqueda.' : 'La biblioteca está vacía. Crea tu primer alimento con los valores de su etiqueta o una fuente de confianza.'}</div>`;
     return;
   }
-  els.mealFoodList.innerHTML = foods.map(food => `<article class="card meal-library-row" data-food-id="${escapeHTML(food.id)}">
-    <div class="meal-library-name"><strong>${escapeHTML(food.name)}</strong><small>${escapeHTML(food.source || 'Manual')} · valores por 100 g</small></div>
-    <div class="meal-library-kcal">${formatKcal(food.kcal)}</div>
-    <div class="meal-library-macros">P ${formatNumber(food.protein,1)} · C ${formatNumber(food.carbs,1)} · G ${formatNumber(food.fat,1)}${safeNumber(food.fiber) ? ` · Fibra ${formatNumber(food.fiber,1)}` : ''}</div>
-    <div class="meal-library-actions">
-      <button class="secondary-button compact-button food-quick-add" type="button" ${state.selectedPersonId ? '' : 'disabled'}>Añadir</button>
-      <button class="secondary-button compact-button food-edit" type="button">Editar</button>
-    </div>
-  </article>`).join('');
+  els.mealFoodList.innerHTML = foods.map(food => {
+    const usual = positiveNumber(food.servingUsual);
+    const category = planningCategoryLabel(food);
+    const planning = food?.assistantEnabled === false
+      ? 'No usar en planes automáticos'
+      : `${category} · ${usual ? `ración ${formatNumber(usual,0)} g` : 'ración automática'} · ${foodMealRuleLabel(food)}`;
+    return `<article class="card meal-library-row" data-food-id="${escapeHTML(food.id)}">
+      <div class="meal-library-name"><strong>${escapeHTML(food.name)}</strong><small>${escapeHTML(food.source || 'Manual')} · valores por 100 g</small><small class="meal-library-planning">${escapeHTML(planning)}</small></div>
+      <div class="meal-library-kcal">${formatKcal(food.kcal)}</div>
+      <div class="meal-library-macros">P ${formatNumber(food.protein,1)} · C ${formatNumber(food.carbs,1)} · G ${formatNumber(food.fat,1)}${safeNumber(food.fiber) ? ` · Fibra ${formatNumber(food.fiber,1)}` : ''}</div>
+      <div class="meal-library-actions">
+        <button class="secondary-button compact-button food-quick-add" type="button" ${state.selectedPersonId ? '' : 'disabled'}>Añadir</button>
+        <button class="secondary-button compact-button food-edit" type="button">Editar</button>
+      </div>
+    </article>`;
+  }).join('');
   els.mealFoodList.querySelectorAll('.meal-library-row').forEach(row => {
     row.querySelector('.food-edit').addEventListener('click', () => openFoodDialog(row.dataset.foodId));
     row.querySelector('.food-quick-add').addEventListener('click', () => openEntryDialog(null, state.mealTypes[0]?.id, row.dataset.foodId));
@@ -631,6 +698,13 @@ function openFoodDialog(foodId = null) {
   els.foodFat.value = food?.fat ?? '';
   els.foodFiber.value = food?.fiber ?? '';
   els.foodSource.value = food?.source || 'Manual';
+  els.foodPlanningCategory.value = FOOD_CATEGORY_LABELS[food?.planningCategory] ? food.planningCategory : 'auto';
+  els.foodServingUsual.value = positiveNumber(food?.servingUsual) ?? '';
+  els.foodServingMin.value = positiveNumber(food?.servingMin) ?? '';
+  els.foodServingMax.value = positiveNumber(food?.servingMax) ?? '';
+  els.foodServingStep.value = positiveNumber(food?.servingStep) ?? '';
+  els.foodAssistantEnabled.checked = food?.assistantEnabled !== false;
+  renderFoodMealCompatibility(food);
   els.deleteFoodButton.hidden = !food;
   els.foodDialog.showModal();
   setTimeout(() => els.foodName.focus(), 20);
@@ -640,6 +714,30 @@ async function saveFood(event) {
   event.preventDefault();
   const name = els.foodName.value.trim();
   if (!name) return;
+  const servingUsual = positiveOptionalInputValue(els.foodServingUsual);
+  const servingMin = positiveOptionalInputValue(els.foodServingMin);
+  const servingMax = positiveOptionalInputValue(els.foodServingMax);
+  const servingStep = positiveOptionalInputValue(els.foodServingStep);
+  if (servingMin && servingMax && servingMin > servingMax) {
+    showToast('La ración mínima no puede superar la máxima');
+    return;
+  }
+  if (servingUsual && servingMin && servingUsual < servingMin) {
+    showToast('La ración habitual debe ser igual o mayor que la mínima');
+    return;
+  }
+  if (servingUsual && servingMax && servingUsual > servingMax) {
+    showToast('La ración habitual debe ser igual o menor que la máxima');
+    return;
+  }
+  const checkedMealIds = [...els.foodMealCompatibility.querySelectorAll('input[type="checkbox"]:checked')].map(input => input.value);
+  const allMealIds = state.mealTypes.map(type => type.id);
+  const assistantEnabled = Boolean(els.foodAssistantEnabled.checked);
+  if (assistantEnabled && allMealIds.length && !checkedMealIds.length) {
+    showToast('Marca al menos una comida o desactiva el uso en el asistente');
+    return;
+  }
+  const allowedMealTypeIds = checkedMealIds.length === allMealIds.length ? [] : checkedMealIds;
   const now = Date.now();
   const previous = state.editingFoodId ? state.foods.find(item => item.id === state.editingFoodId) : null;
   const food = {
@@ -651,9 +749,16 @@ async function saveFood(event) {
     fat: safeNumber(els.foodFat.value),
     fiber: safeNumber(els.foodFiber.value),
     source: els.foodSource.value || 'Manual',
+    planningCategory: els.foodPlanningCategory.value || 'auto',
+    servingUsual,
+    servingMin,
+    servingMax,
+    servingStep,
+    assistantEnabled,
+    allowedMealTypeIds,
     createdAt: previous?.createdAt || now,
     modifiedAt: now,
-    syncVersion: 1,
+    syncVersion: 2,
   };
   await nutritionPut('foods', food);
   state.editingFoodId = null;
@@ -1100,11 +1205,19 @@ function foodContribution(food, grams) {
 function assistantFoodLimits(food) {
   const kcal = safeNumber(food?.kcal);
   const fat = safeNumber(food?.fat);
-  if (kcal >= 500 || fat >= 45) return { min: 5, max: 60, step: 5 };
-  if (kcal >= 350 || fat >= 25) return { min: 10, max: 100, step: 5 };
-  if (kcal >= 220) return { min: 20, max: 160, step: 5 };
-  if (kcal >= 120) return { min: 25, max: 220, step: 5 };
-  return { min: 30, max: 300, step: 5 };
+  let fallback;
+  if (kcal >= 500 || fat >= 45) fallback = { min: 5, max: 60, step: 5 };
+  else if (kcal >= 350 || fat >= 25) fallback = { min: 10, max: 100, step: 5 };
+  else if (kcal >= 220) fallback = { min: 20, max: 160, step: 5 };
+  else if (kcal >= 120) fallback = { min: 25, max: 220, step: 5 };
+  else fallback = { min: 30, max: 300, step: 5 };
+  const step = positiveNumber(food?.servingStep) || fallback.step;
+  let min = positiveNumber(food?.servingMin) || fallback.min;
+  let max = positiveNumber(food?.servingMax) || fallback.max;
+  if (min > max) [min, max] = [max, min];
+  const usualRaw = positiveNumber(food?.servingUsual);
+  const usual = usualRaw ? Math.min(max, Math.max(min, usualRaw)) : null;
+  return { min, max, step, usual, configured: Boolean(positiveNumber(food?.servingMin) || positiveNumber(food?.servingMax) || positiveNumber(food?.servingUsual) || positiveNumber(food?.servingStep)) };
 }
 
 function assistantPlanScore(totals, target, foodCount = 0) {
@@ -1127,6 +1240,27 @@ function assistantPlanScore(totals, target, foodCount = 0) {
   return score + Math.max(0, foodCount - 1) * 0.018;
 }
 
+function assistantSelectionPenalty(selection) {
+  let penalty = 0;
+  const categoryCounts = new Map();
+  for (const item of selection) {
+    const limits = assistantFoodLimits(item.food);
+    if (limits.usual) {
+      const deviation = Math.abs(item.grams - limits.usual) / Math.max(50, limits.usual);
+      penalty += Math.min(0.09, deviation * 0.035);
+    }
+    const category = foodPlanningCategory(item.food);
+    if (!['mixed','other'].includes(category)) categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+  }
+  for (const count of categoryCounts.values()) if (count > 1) penalty += (count - 1) * 0.035;
+  return penalty;
+}
+
+function assistantCombinedScore(selection, target) {
+  const totals = totalsForAssistantSelection(selection);
+  return assistantPlanScore(totals, target, selection.length) + assistantSelectionPenalty(selection);
+}
+
 function totalsForAssistantSelection(selection) {
   let totals = emptyTotals();
   for (const item of selection) totals = addTotalsCopy(totals, foodContribution(item.food, item.grams));
@@ -1136,19 +1270,24 @@ function totalsForAssistantSelection(selection) {
 function bestSingleFoodOption(food, target) {
   const limits = assistantFoodLimits(food);
   let best = null;
-  for (let grams = limits.min; grams <= limits.max; grams += limits.step) {
-    const totals = foodContribution(food, grams);
-    const score = assistantPlanScore(totals, target, 1);
+  for (let grams = limits.min; grams <= limits.max + 1e-9; grams += limits.step) {
+    const selection = [{ food, grams }];
+    const score = assistantCombinedScore(selection, target);
     if (!best || score < best.score) best = { food, grams, score, limits };
   }
   return best;
 }
 
-function optimizeFoodCombination(target) {
-  const validFoods = state.foods.filter(food =>
+function optimizeFoodCombination(target, { mealTypeId = '', excludeFoodIds = new Set() } = {}) {
+  const allValid = state.foods.filter(food =>
+    foodAllowedForMeal(food, mealTypeId) &&
     safeNumber(food.kcal) + safeNumber(food.protein) + safeNumber(food.carbs) + safeNumber(food.fat) > 0
   );
-  if (!validFoods.length || !hasMeaningfulRemaining(target)) return { items: [], totals: emptyTotals(), score: Infinity };
+  if (!allValid.length || !hasMeaningfulRemaining(target)) return { items: [], totals: emptyTotals(), score: Infinity };
+
+  const excluded = excludeFoodIds instanceof Set ? excludeFoodIds : new Set(excludeFoodIds || []);
+  const preferred = allValid.filter(food => !excluded.has(food.id));
+  const validFoods = preferred.length >= Math.min(3, allValid.length) ? preferred : allValid;
 
   const candidates = validFoods
     .map(food => bestSingleFoodOption(food, target))
@@ -1157,8 +1296,8 @@ function optimizeFoodCombination(target) {
     .slice(0, ASSISTANT_MAX_FOODS);
 
   const selected = new Map();
-  let totals = emptyTotals();
-  let currentScore = assistantPlanScore(totals, target, 0);
+  let selection = [];
+  let currentScore = assistantCombinedScore(selection, target);
 
   for (let iteration = 0; iteration < 180; iteration++) {
     let bestMove = null;
@@ -1167,61 +1306,58 @@ function optimizeFoodCombination(target) {
       const isNew = currentGrams === 0;
       if (isNew && selected.size >= ASSISTANT_MAX_ITEMS_PER_MEAL) continue;
       const addGrams = isNew ? candidate.limits.min : candidate.limits.step;
-      if (currentGrams + addGrams > candidate.limits.max) continue;
-      const testTotals = addTotalsCopy(totals, foodContribution(candidate.food, addGrams));
-      const testCount = selected.size + (isNew ? 1 : 0);
-      const score = assistantPlanScore(testTotals, target, testCount);
-      if (!bestMove || score < bestMove.score) bestMove = { candidate, addGrams, score, totals: testTotals };
+      if (currentGrams + addGrams > candidate.limits.max + 1e-9) continue;
+      const testMap = new Map(selected);
+      testMap.set(candidate.food.id, currentGrams + addGrams);
+      const test = [...testMap.entries()].map(([foodId, grams]) => ({ food: validFoods.find(food => food.id === foodId), grams })).filter(item => item.food);
+      const score = assistantCombinedScore(test, target);
+      if (!bestMove || score < bestMove.score) bestMove = { candidate, addGrams, score, testMap, selection: test };
     }
     if (!bestMove || bestMove.score >= currentScore - 0.00015) break;
-    const id = bestMove.candidate.food.id;
-    selected.set(id, (selected.get(id) || 0) + bestMove.addGrams);
-    totals = bestMove.totals;
+    selected.clear();
+    for (const [id, grams] of bestMove.testMap.entries()) selected.set(id, grams);
+    selection = bestMove.selection;
     currentScore = bestMove.score;
     if (currentScore < 0.004) break;
   }
 
-  if (!selected.size && candidates[0]) selected.set(candidates[0].food.id, candidates[0].grams);
+  if (!selected.size && candidates[0]) {
+    selected.set(candidates[0].food.id, candidates[0].grams);
+    selection = [{ food: candidates[0].food, grams: candidates[0].grams }];
+  }
 
-  let selection = [...selected.entries()].map(([foodId, grams]) => ({
-    food: validFoods.find(food => food.id === foodId),
-    grams,
-  })).filter(item => item.food && item.grams > 0);
-
-  // Pequeño refinado local de cantidades. Mantiene el coste bajo en tablets antiguas.
+  // Refinado local de cantidades. Sigue siendo ligero para tablets antiguas.
   for (let pass = 0; pass < 5 && selection.length; pass++) {
     let improved = false;
     let bestSelection = selection;
-    let bestTotals = totalsForAssistantSelection(selection);
-    let bestScore = assistantPlanScore(bestTotals, target, selection.length);
+    let bestScore = assistantCombinedScore(selection, target);
     for (let i = 0; i < selection.length; i++) {
       const item = selection[i];
       const limits = assistantFoodLimits(item.food);
       for (const direction of [-1, 1]) {
         const nextGrams = item.grams + limits.step * direction;
-        if (nextGrams < limits.min || nextGrams > limits.max) continue;
+        if (nextGrams < limits.min - 1e-9 || nextGrams > limits.max + 1e-9) continue;
         const test = selection.map((entry, index) => index === i ? { ...entry, grams: nextGrams } : entry);
-        const testTotals = totalsForAssistantSelection(test);
-        const score = assistantPlanScore(testTotals, target, test.length);
+        const score = assistantCombinedScore(test, target);
         if (score < bestScore - 0.0001) {
           bestSelection = test;
-          bestTotals = testTotals;
           bestScore = score;
           improved = true;
         }
       }
     }
     selection = bestSelection;
-    totals = bestTotals;
     currentScore = bestScore;
     if (!improved) break;
   }
 
-  return {
-    items: selection.map(item => ({
+  const items = selection.map(item => {
+    const limits = assistantFoodLimits(item.food);
+    const rounded = Math.max(limits.min, Math.min(limits.max, Math.round(item.grams / limits.step) * limits.step));
+    return {
       foodId: item.food.id,
       foodName: item.food.name,
-      grams: Math.round(item.grams / 5) * 5,
+      grams: Math.round(rounded * 10) / 10,
       foodSnapshot: {
         id: item.food.id,
         name: item.food.name,
@@ -1232,10 +1368,10 @@ function optimizeFoodCombination(target) {
         fiber: safeNumber(item.food.fiber),
         source: item.food.source || 'Manual',
       },
-    })),
-    totals,
-    score: currentScore,
-  };
+    };
+  });
+  const totals = items.reduce((sum, item) => addTotalsCopy(sum, foodContribution(item.foodSnapshot, item.grams)), emptyTotals());
+  return { items, totals, score: currentScore };
 }
 
 function macroStatusLine(label, key, totals, target, unit = 'g') {
@@ -1324,7 +1460,7 @@ function planText(title, items, baseTotals, target, intro = '') {
     `C ${formatNumber(after.carbs,1)} / ${formatNumber(target.carbs,1)} g`,
     `G ${formatNumber(after.fat,1)} / ${formatNumber(target.fat,1)} g`,
   ];
-  return `${intro ? `${intro}\n\n` : ''}${title}\n\n${sections.join('\n\n')}\n\nSi añades la propuesta, el día quedaría aproximadamente en:\n${afterLines.join(' · ')}\n\nLas cantidades están redondeadas a 5 g y se calculan únicamente con los valores de tu biblioteca.`;
+  return `${intro ? `${intro}\n\n` : ''}${title}\n\n${sections.join('\n\n')}\n\nSi añades la propuesta, el día quedaría aproximadamente en:\n${afterLines.join(' · ')}\n\nLas cantidades respetan el incremento y los límites de ración configurados en tu biblioteca. Si un alimento no tiene reglas propias, uso límites automáticos conservadores.`;
 }
 
 function buildRestOfDayPlan({ fullDay = false } = {}) {
@@ -1351,12 +1487,16 @@ function buildRestOfDayPlan({ fullDay = false } = {}) {
   if (!slots.length) return { text: 'No hay tipos de comida configurados. Crea al menos uno para generar un plan.' };
 
   const planItems = [];
+  const usedFoodIds = new Set(dayEntries.map(entry => entry.foodId).filter(Boolean));
   for (let index = 0; index < slots.length && hasMeaningfulRemaining(remaining); index++) {
     const type = slots[index];
     const divisor = Math.max(1, slots.length - index);
     const desired = scaleGoals(remaining, 1 / divisor);
-    const proposal = optimizeFoodCombination(desired);
-    for (const item of proposal.items) planItems.push({ ...item, mealTypeId: type.id });
+    const proposal = optimizeFoodCombination(desired, { mealTypeId: type.id, excludeFoodIds: usedFoodIds });
+    for (const item of proposal.items) {
+      planItems.push({ ...item, mealTypeId: type.id });
+      usedFoodIds.add(item.foodId);
+    }
     remaining = subtractGoals(remaining, proposal.totals);
   }
   return {
@@ -1381,7 +1521,8 @@ function buildNextMealPlan(text) {
   const laterEmpty = emptyTypes.filter(type => Number(type.order ?? 999) >= chosenOrder);
   const divisor = Math.max(1, explicit ? laterEmpty.length || 1 : emptyTypes.length || 1);
   const desired = scaleGoals(remaining, 1 / divisor);
-  const proposal = optimizeFoodCombination(desired);
+  const usedFoodIds = new Set(entriesFor(state.selectedPersonId, state.selectedDate).map(entry => entry.foodId).filter(Boolean));
+  const proposal = optimizeFoodCombination(desired, { mealTypeId: chosen.id, excludeFoodIds: usedFoodIds });
   const items = proposal.items.map(item => ({ ...item, mealTypeId: chosen.id }));
   return {
     text: planText(`Propuesta para ${chosen.name}`, items, baseTotals, target, divisor > 1 ? `He reservado parte de lo que falta para las ${divisor - 1} comida${divisor - 1 === 1 ? '' : 's'} posterior${divisor - 1 === 1 ? '' : 'es'}.` : 'Esta propuesta intenta cubrir la mayor parte de lo que queda hoy.'),
@@ -1445,10 +1586,42 @@ function simulationText(text) {
   return answer;
 }
 
+function substitutionText(text) {
+  const normalized = normalizeAssistantText(text);
+  const match = normalized.match(/(?:sustituye|sustituir|alternativas?(?:\s+(?:a|para))?|cambia)\s+(?:(\d+(?:[.,]\d+)?)\s*(?:g|gr|gramos?)\s+(?:de\s+)?)?(.+)$/i);
+  if (!match) return null;
+  const food = findFoodByAssistantName(match[2]);
+  if (!food) return `No encuentro “${match[2].trim()}” en tu biblioteca de alimentos.`;
+  const sourceLimits = assistantFoodLimits(food);
+  const grams = safeNumber(String(match[1] || '').replace(',', '.')) || sourceLimits.usual || 100;
+  const target = foodContribution(food, grams);
+  const sourceCategory = foodPlanningCategory(food);
+  const alternatives = state.foods
+    .filter(candidate => candidate.id !== food.id && candidate?.assistantEnabled !== false)
+    .map(candidate => {
+      const best = bestSingleFoodOption(candidate, target);
+      if (!best) return null;
+      const categoryPenalty = foodPlanningCategory(candidate) === sourceCategory ? 0 : 0.035;
+      return { ...best, rankingScore: best.score + categoryPenalty };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.rankingScore - b.rankingScore)
+    .slice(0, 3);
+  if (!alternatives.length) return `No encuentro una alternativa útil a ${formatNumber(grams,0)} g de ${food.name} con los alimentos actuales de tu biblioteca.`;
+  const lines = alternatives.map((item, index) => {
+    const values = foodContribution(item.food, item.grams);
+    return `${index + 1}. ${item.food.name}: ${formatNumber(item.grams,0)} g · ${formatNumber(values.kcal,0)} kcal · P ${formatNumber(values.protein,1)} · C ${formatNumber(values.carbs,1)} · G ${formatNumber(values.fat,1)}`;
+  });
+  const original = foodContribution(food, grams);
+  return `Alternativas aproximadas a ${formatNumber(grams,0)} g de ${food.name}\nOriginal: ${formatNumber(original.kcal,0)} kcal · P ${formatNumber(original.protein,1)} · C ${formatNumber(original.carbs,1)} · G ${formatNumber(original.fat,1)}\n\n${lines.join('\n')}\n\nHe priorizado similitud nutricional y, cuando es posible, la misma categoría. Puedes afinar las raciones y categorías editando cada alimento.`;
+}
+
 function localAssistantAnswer(text) {
   const normalized = normalizeAssistantText(text);
   const simulation = /(que pasa si|simula|si anado|si añado|si agrego)/.test(normalized) ? simulationText(text) : null;
   if (simulation) return { text: simulation };
+  const substitution = /(sustituye|sustituir|alternativa|alternativas|cambia)/.test(normalized) ? substitutionText(text) : null;
+  if (substitution) return { text: substitution };
   if (/(planifica.*resto|resto.*dia|completa.*dia|ajusta.*resto)/.test(normalized)) return buildRestOfDayPlan({ fullDay: false });
   if (/(plan completo|plan.*dia|hazme.*plan|planifica.*dia)/.test(normalized)) return buildRestOfDayPlan({ fullDay: true });
   if (/(semana|semanal)/.test(normalized)) return { text: weeklyReviewText() };
@@ -1460,14 +1633,14 @@ function localAssistantAnswer(text) {
 }
 
 function assistantHelpText() {
-  return 'El asistente local usa únicamente tus objetivos, tu menú y los alimentos guardados. Puede analizar el día, calcular lo que falta, proponer una comida, planificar el resto del día, construir un plan completo cuando el día está vacío, revisar la semana y simular cantidades. No calcula cuáles deberían ser tus objetivos ni usa servicios externos.';
+  return 'El asistente local usa únicamente tus objetivos, tu menú y los alimentos guardados. Puede analizar el día, calcular lo que falta, proponer una comida, planificar el resto del día, construir un plan completo cuando el día está vacío, revisar la semana, simular cantidades y buscar sustituciones aproximadas. En V11-D2 también respeta raciones, categorías y comidas permitidas configuradas por alimento. No calcula cuáles deberían ser tus objetivos ni usa servicios externos.';
 }
 
 function renderChatMessages() {
   if (!els.nutritionChatMessages) return;
   const messages = chatMessagesForPerson();
   if (!messages.length) {
-    els.nutritionChatMessages.innerHTML = `<div class="nutrition-chat-welcome"><strong>Asistente nutricional local</strong><span>Funciona sin Internet y utiliza solo tus objetivos, tu menú y la biblioteca de alimentos. Prueba “Hazme un plan del día” o usa los botones rápidos.</span></div>`;
+    els.nutritionChatMessages.innerHTML = `<div class="nutrition-chat-welcome"><strong>Asistente nutricional local</strong><span>Funciona sin Internet y utiliza solo tus objetivos, tu menú y la biblioteca de alimentos. V11-D2 puede respetar raciones y comidas permitidas. Prueba “Hazme un plan del día” o usa los botones rápidos.</span></div>`;
   } else {
     els.nutritionChatMessages.innerHTML = messages.map(message => {
       const planAction = message.role === 'assistant' && message.plan?.items?.length

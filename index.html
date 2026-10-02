@@ -13,7 +13,7 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
-  <title>HomeTasks V11-D</title>
+  <title>HomeTasks V11-D2</title>
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -22,7 +22,7 @@
         <div class="app-mark" aria-hidden="true">⌂</div>
         <div>
           <h1>HomeTasks</h1>
-          <p class="subtitle">V11-D · tareas + plan de comidas + asistente local</p>
+          <p class="subtitle">V11-D2 · tareas + plan de comidas + asistente local</p>
         </div>
       </div>
       <div class="top-actions">
@@ -326,7 +326,7 @@
           <div>
             <p class="eyebrow">Plan de comidas · sincronización independiente</p>
             <h2 id="mealsTitle">Comidas</h2>
-            <p class="section-note">Planifica por persona y calcula calorías y macronutrientes. V11-D mantiene la sincronización de Comidas y añade un asistente nutricional local que funciona sin API.</p>
+            <p class="section-note">Planifica por persona y calcula calorías y macronutrientes. V11-D2 mantiene el asistente local y añade reglas de ración, compatibilidad por comida, variedad y sustituciones.</p>
           </div>
           <button id="nutritionChatButton" class="secondary-button nutrition-chat-button" type="button" title="Abrir el asistente nutricional local">✨ Asistente nutricional <small>Local</small></button>
         </div>
@@ -446,11 +446,11 @@
           </article>
 
           <article class="card settings-card">
-            <h3>Estado de V11-D</h3>
+            <h3>Estado de V11-D2</h3>
             <div class="setting-row"><span>Datos</span><strong>IndexedDB local</strong></div>
             <div class="setting-row"><span>Modo offline</span><strong id="offlineReady">Comprobando...</strong></div>
             <div class="setting-row"><span>Sincronización</span><strong id="syncStateSummary" class="muted">Sin configurar</strong></div>
-            <div class="setting-row"><span>Versión</span><strong>V11-D</strong></div>
+            <div class="setting-row"><span>Versión</span><strong>V11-D2</strong></div>
           </article>
 
           <article id="notificationSettingsCard" class="card settings-card notification-card">
@@ -590,14 +590,14 @@
 
           <article class="card settings-card">
             <h3>Datos locales</h3>
-            <p>Restablece HomeTasks a los datos iniciales de V11-D. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
-            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-D</button>
+            <p>Restablece HomeTasks a los datos iniciales de V11-D2. Antes se crea una copia local de seguridad. Se eliminaran tareas, rutinas, personas, historico y datos locales de Comidas de este dispositivo.</p>
+            <button id="resetButton" class="secondary-button danger-button" type="button">Restablecer V11-D2</button>
           </article>
 
           <article class="card settings-card">
             <h3>Actualización de la app</h3>
             <p>Fuerza la descarga del código publicado más reciente sin borrar IndexedDB, la URL de Apps Script, la clave de la casa ni tus preferencias.</p>
-            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-D</strong></div>
+            <div class="setting-row"><span>Versión instalada</span><strong id="appVersionDisplay">V11-D2</strong></div>
             <div class="setting-row"><span>Última actualización forzada</span><strong id="lastForcedUpdate">Nunca</strong></div>
             <button id="forceAppUpdateButton" class="secondary-button" type="button">Forzar actualización de la aplicación</button>
           </article>
@@ -885,6 +885,14 @@
         <label><span>Grasa / 100 g</span><input id="foodFat" type="number" min="0" step="0.1" inputmode="decimal" required /></label>
         <label><span>Fibra / 100 g <small>(opcional)</small></span><input id="foodFiber" type="number" min="0" step="0.1" inputmode="decimal" /></label>
         <label><span>Origen</span><select id="foodSource"><option>Manual</option><option>Etiqueta nutricional</option><option value="Gemini">Gemini (legacy)</option><option value="ChatGPT">ChatGPT (legacy)</option></select></label>
+        <div class="form-section-title full-width">Reglas del asistente local <small>(opcionales)</small></div>
+        <label><span>Categoría</span><select id="foodPlanningCategory"><option value="auto">Automática</option><option value="protein">Proteína</option><option value="carb">Carbohidrato</option><option value="fat">Grasa</option><option value="fruit">Fruta</option><option value="vegetable">Verdura</option><option value="dairy">Lácteo</option><option value="mixed">Mixto</option><option value="other">Otro</option></select></label>
+        <label class="checkbox-field"><span>Planificación</span><span class="checkbox-line"><input id="foodAssistantEnabled" type="checkbox" checked><span>Usar este alimento en planes automáticos</span></span></label>
+        <label><span>Ración habitual</span><div class="duration-input"><input id="foodServingUsual" type="number" min="1" step="1" inputmode="decimal" placeholder="Auto" /><span>g</span></div></label>
+        <label><span>Ración mínima</span><div class="duration-input"><input id="foodServingMin" type="number" min="1" step="1" inputmode="decimal" placeholder="Auto" /><span>g</span></div></label>
+        <label><span>Ración máxima</span><div class="duration-input"><input id="foodServingMax" type="number" min="1" step="1" inputmode="decimal" placeholder="Auto" /><span>g</span></div></label>
+        <label><span>Incremento</span><div class="duration-input"><input id="foodServingStep" type="number" min="1" step="1" inputmode="decimal" placeholder="5" /><span>g</span></div></label>
+        <div class="full-width food-meal-rule-field"><span class="field-label">Comidas permitidas</span><div id="foodMealCompatibility" class="food-meal-compatibility"></div><small>Deja marcadas todas si puede aparecer en cualquier comida. Las reglas se sincronizan con tus dispositivos.</small></div>
       </div>
       <div class="dialog-actions task-dialog-actions">
         <button id="deleteFoodButton" class="secondary-button dialog-delete-button" type="button" hidden>Eliminar alimento</button>
@@ -999,6 +1007,7 @@
         <button type="button" data-chat-prompt="Planifica el resto del día">Planificar resto</button>
         <button type="button" data-chat-prompt="Hazme un plan del día">Plan del día</button>
         <button type="button" data-chat-prompt="Revisa mi semana">Revisar semana</button>
+        <button type="button" data-chat-prompt="Sustituye 100 g de ">Buscar sustituto</button>
       </div>
 
       <form id="nutritionChatForm" class="nutrition-chat-compose">
@@ -1006,7 +1015,7 @@
         <textarea id="nutritionChatInput" rows="2" maxlength="1800" placeholder="Ej. Hazme un plan del día para llegar a mis objetivos…" required></textarea>
         <button id="nutritionChatSend" class="primary-button" type="submit">Enviar</button>
       </form>
-      <p class="nutrition-chat-note">El cálculo del asistente se ejecuta completamente en local y no envía datos a ningún servicio de IA. Si tienes activa la sincronización de HomeTasks, el historial del asistente se sincroniza con tu almacenamiento de HomeTasks igual que el resto de datos de Comidas. Usa únicamente los objetivos que tú hayas configurado y los valores de tu biblioteca. Sus propuestas son cálculos orientativos y no sustituyen consejo médico o dietético profesional.</p>
+      <p class="nutrition-chat-note">El cálculo del asistente se ejecuta completamente en local y no envía datos a ningún servicio de IA. Si tienes activa la sincronización de HomeTasks, el historial del asistente se sincroniza con tu almacenamiento de HomeTasks igual que el resto de datos de Comidas. Usa únicamente los objetivos que tú hayas configurado y los valores de tu biblioteca. En V11-D2 el optimizador respeta las reglas de ración y comidas permitidas que configures en cada alimento. Sus propuestas son cálculos orientativos y no sustituyen consejo médico o dietético profesional.</p>
     </div>
   </dialog>
 
