@@ -1907,3 +1907,392 @@ html.tablet-ui .meal-week-open small { font-size: 8px; }
   .topbar .status-badge { display: none; }
   .top-actions { gap: 5px; }
 }
+
+/* ========================================================================== 
+   V12-A2 · cierre UX global
+   Capa de presentación únicamente. Sin cambios de lógica ni de datos.
+   ========================================================================== */
+
+:root {
+  --radius-xs: 9px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --control-h: 44px;
+  --shadow-soft: 0 1px 2px rgba(24, 32, 44, .04), 0 8px 24px rgba(24, 32, 44, .055);
+  --shadow-float: 0 14px 38px rgba(24, 32, 44, .15);
+}
+
+:root[data-theme="dark"] {
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, .18), 0 10px 28px rgba(0, 0, 0, .16);
+  --shadow-float: 0 16px 42px rgba(0, 0, 0, .34);
+}
+
+html { scroll-behavior: smooth; }
+body {
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button:not(:disabled), input, select, textarea { transition: border-color .15s ease, background-color .15s ease, color .15s ease, box-shadow .15s ease, transform .12s ease; }
+button:disabled { opacity: .52; cursor: not-allowed; }
+button:not(:disabled):active { transform: translateY(1px); }
+
+/* Cabecera y estructura */
+.topbar {
+  min-height: 68px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 35%, transparent);
+}
+.app-mark { width: 38px; height: 38px; border-radius: 13px; font-size: 22px; }
+.topbar h1 { font-size: 17px; }
+.subtitle { font-size: 10px; }
+.top-actions { gap: 7px; }
+.icon-button { width: 40px; height: 40px; border-radius: var(--radius-sm); box-shadow: 0 1px 2px rgba(24,32,44,.03); }
+.sync-header-badge { min-height: 36px; padding-inline: 11px; }
+.global-add-button { min-height: 40px; border-radius: var(--radius-sm); }
+
+.content { padding: 28px 22px 30px; }
+.view:not(#view-today) { width: min(1180px, 100%); }
+.section-heading { align-items: center; margin-bottom: 20px; }
+.section-heading h2 { font-size: clamp(29px, 3.4vw, 38px); line-height: 1.04; }
+.eyebrow { margin-bottom: 5px; }
+.section-note { max-width: 760px; line-height: 1.45; }
+
+/* Superficies y jerarquía */
+.card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+}
+.card-header { align-items: center; margin-bottom: 14px; }
+.card-header h3 { font-size: 16px; line-height: 1.2; }
+.card-header p { line-height: 1.45; }
+
+.primary-button, .secondary-button {
+  min-height: var(--control-h);
+  border-radius: var(--radius-sm);
+  padding-inline: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  line-height: 1.1;
+}
+.primary-button { box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 17%, transparent); }
+.primary-button:hover { box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 24%, transparent); }
+.secondary-button { box-shadow: 0 1px 2px rgba(24,32,44,.025); }
+.compact-button { min-height: 38px; padding-inline: 12px; }
+.text-button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; }
+
+/* Formularios */
+label { gap: 7px; }
+label > span { font-size: 10.5px; letter-spacing: .01em; }
+input, select, textarea {
+  min-height: var(--control-h);
+  border-radius: var(--radius-sm);
+  padding-inline: 12px;
+  background: color-mix(in srgb, var(--surface-2) 78%, var(--surface));
+}
+textarea { width: 100%; padding-top: 10px; padding-bottom: 10px; color: var(--text); border: 1px solid var(--border); outline: none; resize: vertical; }
+input:hover, select:hover, textarea:hover { border-color: color-mix(in srgb, var(--text) 20%, var(--border)); }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.filter-card { padding: 16px; margin-bottom: 18px; }
+.filters { gap: 12px; }
+
+/* Listas y estados vacíos */
+.task-list, .routine-list, .meal-food-list { gap: 9px; }
+.task-item, .routine-card, .meal-library-row {
+  border-radius: var(--radius-md);
+  box-shadow: 0 1px 2px rgba(24,32,44,.03), 0 5px 16px rgba(24,32,44,.035);
+}
+.task-item { min-height: 64px; padding: 12px 14px; }
+.task-check { width: 38px; height: 38px; border-radius: 11px; }
+.task-action { width: 38px; height: 38px; border-radius: 11px; }
+.task-meta { line-height: 1.4; }
+.task-day-group { gap: 9px; }
+.task-day-heading { padding-top: 8px; }
+
+.list-empty, .today-empty, .stats-empty, .meal-empty, .meal-library-empty, .users-empty, .empty-state {
+  min-height: 82px;
+  padding: 22px 16px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  line-height: 1.5;
+  border: 1px dashed color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-2) 52%, var(--surface));
+  color: var(--muted);
+}
+
+/* Hoy: conserva mapa y estructura; solo unifica superficies */
+.today-dashboard-grid, .today-secondary-grid { gap: 16px; }
+.today-map-card, .today-plan-card, .today-unassigned-panel, .today-summary-card, .today-panel { border-radius: var(--radius-lg); }
+.today-map-card { padding: 16px; }
+.today-plan-card, .today-unassigned-panel { padding: 16px; }
+.today-summary-card, .today-panel { padding: 15px 16px; }
+.today-plan-head, .today-unassigned-head { gap: 12px; }
+.today-summary-stat { border-radius: var(--radius-sm); }
+.today-task-row { border-radius: var(--radius-sm); }
+.today-add-unassigned { min-height: 42px; border-radius: var(--radius-sm); }
+.today-map-meta { padding-top: 10px; }
+
+/* Plan semanal */
+.planner-toolbar { padding: 15px 16px; margin-bottom: 16px; }
+.planner-toolbar-row { gap: 16px; }
+.weekly-planner {
+  margin-bottom: 16px;
+  padding: 2px 2px 14px;
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+.schedule-calendar-shell { border-radius: var(--radius-md); box-shadow: var(--shadow-soft); }
+.planner-lower-grid { gap: 16px; }
+.planner-panel { padding: 17px; }
+.plan-backlog, .workload-summary { min-width: 0; }
+
+/* Rutinas */
+.routine-stats { gap: 12px; margin-bottom: 16px; }
+.mini-stat { min-height: 58px; padding: 14px 16px; border-radius: var(--radius-md); }
+.routine-card { padding: 14px 15px; }
+.routine-actions { gap: 6px; }
+.routine-create, .routine-create-week { min-height: 38px; border-radius: 11px; }
+
+/* Actividad */
+.activity-kpis { gap: 12px; margin-bottom: 16px; }
+.activity-kpi { min-height: 96px; padding: 16px; border-radius: var(--radius-md); }
+.activity-grid { gap: 16px; margin-bottom: 16px; }
+.activity-panel { padding: 17px; }
+.stats-bar-row { padding: 10px 11px; border-radius: var(--radius-sm); }
+.trend-panel { margin-bottom: 20px; }
+.history-detail-heading { margin-top: 22px; }
+.history-row { min-height: 58px; padding: 12px 15px; }
+
+/* Comidas */
+.meals-toolbar { padding: 15px 16px; margin-bottom: 16px; border-radius: var(--radius-lg); }
+.meal-mode-tabs { padding: 4px; border-radius: var(--radius-sm); }
+.meal-mode-tab { min-height: 40px; border-radius: 9px; }
+.meal-date-card { padding: 14px 15px; margin-bottom: 20px; }
+.meal-macro-grid { gap: 12px; margin-bottom: 18px; }
+.meal-macro-card { padding: 15px; border-radius: var(--radius-md); }
+.meal-card { padding: 15px; border-radius: var(--radius-lg); }
+.meal-card-head { padding-bottom: 12px; }
+.meal-food-row { min-height: 54px; padding: 10px 7px; }
+.meal-add-food { min-height: 42px; }
+.meal-week-grid { gap: 10px; }
+.meal-week-day { border-radius: var(--radius-md); }
+.meal-food-search-card { padding: 14px 15px; }
+.meal-library-row { min-height: 68px; padding: 13px 14px; }
+.meal-library-actions .secondary-button, .meal-library-actions .primary-button { min-height: 38px; }
+.meal-type-row { border-radius: var(--radius-sm); }
+.food-meal-compatibility { border-radius: var(--radius-sm); }
+
+/* Ajustes */
+.settings-grid { gap: 16px; }
+.settings-card { padding: 20px; }
+.settings-card h3 { font-size: 16px; }
+.settings-card > p, .settings-title-row p { line-height: 1.55; }
+.settings-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.setting-row { min-height: 40px; padding: 10px 0; align-items: center; }
+.setting-row strong { text-align: right; }
+.inline-form { gap: 9px; }
+.user-row { min-height: 58px; padding: 9px 10px; border-radius: var(--radius-sm); }
+.room-settings-list { gap: 11px; }
+.full-setting-field { margin-top: 16px; }
+.sync-actions { gap: 8px; margin-top: 14px; }
+.sync-actions .primary-button, .sync-actions .secondary-button { min-height: 40px; }
+.drive-panel { padding: 14px; border-radius: var(--radius-md); }
+.switch-row {
+  min-height: 46px;
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--surface));
+}
+.switch-row input { flex: 0 0 auto; }
+.setting-help { line-height: 1.55; }
+.setup-details {
+  margin-top: 15px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-2) 62%, var(--surface));
+}
+.setup-details summary { min-height: 28px; display: flex; align-items: center; }
+.setup-details ol { margin-bottom: 2px; }
+
+/* Diálogos de edición */
+.task-dialog:not(.nutrition-chat-dialog) {
+  border-radius: 22px;
+  box-shadow: 0 30px 90px rgba(0,0,0,.30);
+}
+.task-dialog:not(.nutrition-chat-dialog) form { padding: 20px; }
+.dialog-header { align-items: center; margin-bottom: 18px; }
+.dialog-header h2 { font-size: 23px; letter-spacing: -.035em; }
+.form-grid { gap: 14px; }
+.dialog-actions {
+  padding-top: 14px;
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+/* Hojas UX de A1 */
+.ux-sheet-card { box-shadow: var(--shadow-float); }
+.quick-action-card { border-radius: var(--radius-md); }
+.more-nav-list button { border-radius: var(--radius-sm); }
+.sync-overview-row { border-radius: var(--radius-sm); }
+
+/* Navegación */
+.bottom-nav { box-shadow: 0 14px 42px rgba(20,25,35,.15); }
+.nav-item { min-width: 0; }
+.nav-item:focus-visible { outline-offset: -2px; }
+
+/* Tablet: mejor aprovechamiento sin convertirlo en móvil ampliado */
+@media (min-width: 701px) and (max-width: 1100px) {
+  .content { padding: 22px 16px 28px; }
+  .section-heading { margin-bottom: 17px; }
+  .settings-grid { gap: 12px; }
+  .settings-card { padding: 17px; }
+  .meal-library-row { gap: 10px; }
+  .activity-kpis { gap: 9px; }
+}
+
+/* Móvil */
+@media (max-width: 700px) {
+  :root { --control-h: 46px; }
+  .app-shell { padding-bottom: 100px; }
+  .topbar {
+    min-height: 62px;
+    padding: 8px 10px 8px max(10px, env(safe-area-inset-left));
+    gap: 8px;
+  }
+  .brand-row { gap: 8px; min-width: 0; }
+  .app-mark { width: 34px; height: 34px; border-radius: 11px; font-size: 20px; }
+  .topbar h1 { font-size: 15px; }
+  .top-actions { gap: 4px; }
+  .icon-button { width: 38px; height: 38px; }
+  .sync-header-badge { min-height: 32px; max-width: 118px; padding-inline: 8px; font-size: 9px; }
+
+  .content { padding: 18px 10px 28px; }
+  .section-heading { align-items: flex-start; gap: 10px; margin-bottom: 14px; }
+  .section-heading h2 { font-size: 28px; }
+  .section-note { margin-top: 5px; font-size: 11px; }
+  .section-heading > .primary-button, .section-heading > .secondary-button { flex: 0 0 auto; }
+
+  .card { border-radius: 17px; }
+  .filter-card { padding: 12px; margin-bottom: 14px; }
+  .filters { gap: 10px; }
+  input, select, textarea { font-size: 16px; } /* evita zoom automático en iOS */
+  label > span { font-size: 10px; }
+
+  .primary-button, .secondary-button { min-height: 46px; padding-inline: 13px; }
+  .compact-button { min-height: 40px; }
+  .text-button { min-height: 40px; }
+
+  .task-item { min-height: 70px; padding: 11px 10px; gap: 9px; }
+  .task-check { width: 40px; height: 40px; }
+  .task-actions { flex-direction: row; gap: 2px; }
+  .task-action { width: 40px; height: 40px; font-size: 17px; }
+  .task-title { font-size: 13px; }
+  .task-meta { gap: 4px 9px; font-size: 10.5px; }
+  .task-day-heading { padding-left: 2px; padding-right: 2px; }
+
+  .routine-card { padding: 12px; gap: 11px; }
+  .routine-actions { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 6px; }
+  .routine-create, .routine-create-week { min-height: 42px; }
+
+  .planner-toolbar { padding: 12px; }
+  .planner-toolbar-row { align-items: stretch; gap: 10px; }
+  .planner-lower-grid { gap: 12px; }
+  .planner-panel { padding: 13px; }
+
+  .activity-kpis { gap: 7px; }
+  .activity-kpi { min-height: 86px; padding: 12px; }
+  .activity-panel { padding: 13px; }
+
+  .meals-toolbar { padding: 12px; }
+  .meal-date-card { padding: 12px; }
+  .meal-macro-grid { gap: 7px; }
+  .meal-macro-card { padding: 11px; }
+  .meal-card { padding: 12px; }
+  .meal-library-row { padding: 12px; }
+
+  .settings-grid { gap: 12px; }
+  .settings-card { padding: 14px; }
+  .setting-row { min-height: 42px; gap: 10px; font-size: 12px; }
+  .setting-row strong { max-width: 58%; overflow-wrap: anywhere; }
+  .switch-row { min-height: 50px; padding: 10px; font-size: 11px; }
+  .sync-actions { display: grid; grid-template-columns: 1fr; }
+  .sync-actions .primary-button, .sync-actions .secondary-button { width: 100%; min-height: 46px; }
+  .inline-form { grid-template-columns: 1fr; }
+  .user-add-form { grid-template-columns: minmax(0,1fr) auto; }
+
+  /* Edición en formato hoja inferior. El asistente nutricional mantiene su vista completa. */
+  .task-dialog:not(.nutrition-chat-dialog) {
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - 16px);
+    margin: auto 0 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: 24px 24px 0 0;
+  }
+  .task-dialog:not(.nutrition-chat-dialog) form {
+    max-height: calc(100dvh - 16px);
+    padding: 16px 13px calc(14px + env(safe-area-inset-bottom));
+  }
+  .dialog-header { position: sticky; top: -16px; z-index: 2; margin: -1px 0 14px; padding: 10px 0 9px; background: var(--surface); }
+  .dialog-header h2 { font-size: 21px; }
+  .dialog-actions {
+    position: sticky;
+    bottom: calc(-14px - env(safe-area-inset-bottom));
+    z-index: 2;
+    margin: 16px -13px calc(-14px - env(safe-area-inset-bottom));
+    padding: 11px 13px calc(12px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--surface) 96%, transparent);
+    backdrop-filter: blur(10px);
+  }
+  .dialog-actions .primary-button, .dialog-actions .secondary-button { min-height: 46px; }
+
+  .bottom-nav { height: 66px; border-radius: 20px; }
+  .nav-item { border-radius: 14px; }
+  .nav-item span { font-size: 19px !important; }
+  .nav-item small { font-size: 9px !important; }
+  .mobile-global-add-button { width: 56px; height: 56px; border-radius: 18px; box-shadow: 0 12px 30px color-mix(in srgb,var(--accent) 34%,transparent); }
+
+  .toast { max-width: calc(100% - 28px); white-space: normal; text-align: center; line-height: 1.35; }
+}
+
+@media (max-width: 460px) {
+  .section-heading.task-heading, .section-heading.meals-heading, .section-heading.activity-heading {
+    display: grid;
+    grid-template-columns: minmax(0,1fr) auto;
+    align-items: start;
+  }
+  .section-heading.task-heading > .primary-button,
+  .section-heading.meals-heading > .primary-button,
+  .section-heading.meals-heading > .secondary-button { min-height: 42px; padding-inline: 10px; font-size: 11px; }
+  .routine-stats { grid-template-columns: 1fr 1fr; }
+  .mini-stat { min-height: 54px; padding: 11px 12px; }
+  .mini-stat span { font-size: 10px; }
+  .mini-stat strong { font-size: 22px; }
+  .activity-kpi > strong { font-size: 24px; }
+  .meal-mode-tab { min-height: 42px; padding-inline: 6px; font-size: 11px; }
+  .meal-library-actions { justify-content: stretch; }
+  .meal-library-actions .secondary-button, .meal-library-actions .primary-button { flex: 1 1 0; }
+  .quick-action-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 380px) {
+  .content { padding-inline: 8px; }
+  .section-heading h2 { font-size: 26px; }
+  .sync-header-badge { max-width: 92px; }
+  .task-item { grid-template-columns: 38px minmax(0,1fr) auto; }
+  .task-check { width: 38px; height: 38px; }
+  .task-action { width: 36px; height: 38px; }
+  .routine-actions { grid-template-columns: 1fr 1fr; }
+  .routine-actions .task-action { width: 100%; }
+}

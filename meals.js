@@ -9,7 +9,7 @@ import {
   NUTRITION_DATA_STORES,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '12-A1';
+const NUTRITION_VERSION = '12-A2';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
