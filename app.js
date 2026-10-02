@@ -1,6 +1,6 @@
 import { getAll, put, putMany, remove, clearStore, resetDatabase } from './db.js';
 
-const APP_VERSION = '11-C.1';
+const APP_VERSION = '11-C.2';
 const SYNCABLE_STORES = ['rooms', 'users', 'tasks', 'history', 'templates'];
 const LS_SYNC_PROVIDER = 'hometasks-sync-provider';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
@@ -3040,6 +3040,7 @@ async function createCloudFromLocal() {
     state.syncStatus = await provider.status();
     await loadState();
     renderAll();
+    window.dispatchEvent(new CustomEvent('hometasks:sync-complete', { detail: { silent: false, source: 'create-cloud' } }));
     showToast('Nube HomeTasks creada');
   } catch (error) {
     console.error(error);
@@ -3102,6 +3103,7 @@ async function adoptCloudData() {
     await loadState();
     recordSyncResult(true, 'Datos de la nube cargados');
     renderAll();
+    window.dispatchEvent(new CustomEvent('hometasks:sync-complete', { detail: { silent: false, source: 'adopt-cloud' } }));
     finishSyncProgress(true, 'Dispositivo vinculado', `Datos de la nube cargados en ${((Date.now() - startedAt) / 1000).toFixed(1)} s.`);
     showToast('Datos de la nube cargados');
   } catch (error) {
@@ -3206,6 +3208,7 @@ async function syncNow(options = {}) {
     await loadState();
     recordSyncResult(true, stable ? 'Sincronización completada' : 'Cambios locales pendientes de confirmación');
     renderAll();
+    window.dispatchEvent(new CustomEvent('hometasks:sync-complete', { detail: { silent, source: 'sync-now' } }));
 
     if (!stable) scheduleSyncSoon(900);
     if (!silent) {
@@ -3781,7 +3784,7 @@ function setupEvents() {
   els.forceAppUpdateButton?.addEventListener('click', forceAppUpdate);
 
   els.resetButton.addEventListener('click', async () => {
-    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V11-C.1 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
+    if (!confirm('¿Restablecer todos los datos locales de HomeTasks V11-C.2 en este dispositivo? Se conservará una copia de seguridad previa.')) return;
     await createLocalCheckpoint('before-reset', { quiet: true });
     await resetDatabase();
     await ensureV1Data();
@@ -3799,7 +3802,7 @@ function setupEvents() {
     els.assigneeFilter.value = 'all';
     renderAll();
     window.dispatchEvent(new CustomEvent('hometasks:core-reset'));
-    showToast('V11-C.1 restablecida');
+    showToast('V11-C.2 restablecida');
   });
 
   window.addEventListener('online', updateConnection);

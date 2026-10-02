@@ -4,14 +4,22 @@ import {
   nutritionPut,
   nutritionPutMany,
   nutritionRemove,
+  nutritionClear,
   resetNutritionDatabase,
+  NUTRITION_DATA_STORES,
 } from './nutrition-db.js';
 
-const NUTRITION_VERSION = '11-C.1';
+const NUTRITION_VERSION = '11-C.2';
 const LS_SELECTED_PERSON = 'hometasks-meals-person';
 const LS_SELECTED_DATE = 'hometasks-meals-date';
 const LS_SYNC_ENDPOINT = 'hometasks-appsscript-endpoint';
 const LS_SYNC_HOUSE_KEY = 'hometasks-appsscript-house-key';
+const LS_CLOUD_LINKED = 'hometasks-sync-linked';
+const LS_AUTO_SYNC = 'hometasks-sync-auto';
+const LS_DEVICE_ID = 'hometasks-device-id';
+const LS_NUTRITION_SYNC_DIRTY = 'hometasks-nutrition-sync-dirty';
+const LS_NUTRITION_SYNC_REVISION = 'hometasks-nutrition-sync-revision';
+const LS_NUTRITION_LAST_SYNC = 'hometasks-nutrition-sync-last';
 const CHAT_HISTORY_LIMIT = 10;
 const CHAT_LIBRARY_LIMIT = 80;
 const DEFAULT_MEAL_TYPES = [
@@ -74,6 +82,8 @@ const state = {
   chatBusy: false,
   chatBackendReady: false,
   chatBackendModel: '',
+  nutritionSyncBusy: false,
+  nutritionSyncQueued: false,
 };
 
 const els = {};
@@ -103,6 +113,228 @@ function showToast(message) {
   toast.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+
+let nutritionSyncTimer = null;
+
+function nutritionSyncRevision() {
+  return Number(localStorage.getItem(LS_NUTRITION_SYNC_REVISION) || 0);
+}
+
+function bumpNutritionSyncRevision() {
+  const current = nutritionSyncRevision();
+  const next = Math.max(Date.now(), current + 1);
+  localStorage.setItem(LS_NUTRITION_SYNC_REVISION, String(next));
+  return next;
+}
+
+function markNutritionDirty() {
+  localStorage.setItem(LS_NUTRITION_SYNC_DIRTY, '1');
+  bumpNutritionSyncRevision();
+}
+
+function nutritionSyncAvailable() {
+  const { endpoint, houseKey } = chatBackendConfig();
+  return Boolean(endpoint && houseKey && localStorage.getItem(LS_CLOUD_LINKED) === '1');
+}
+
+function scheduleNutritionSync(delay = 1800) {
+  if (nutritionSyncTimer) clearTimeout(nutritionSyncTimer);
+  if (!navigator.onLine || !nutritionSyncAvailable() || localStorage.getItem(LS_AUTO_SYNC) !== '1') return;
+  nutritionSyncTimer = setTimeout(() => {
+    nutritionSyncTimer = null;
+    nutritionSyncNow({ silent: true }).catch(error => console.warn('Sincronización Comidas:', error));
+  }, delay);
+}
+
+function nutritionItemTimestamp(item) {
+  if (!item) return 0;
+  return Number(item.modifiedAt || item.updatedAt || item.createdAt || 0);
+}
+
+function nutritionEntityId(store, item) {
+  if (!item) return '';
+  return store === 'targets' ? String(item.personId || '') : String(item.id || '');
+}
+
+function validateNutritionSnapshot(snapshot) {
+  if (!snapshot || snapshot.format !== 'hometasks-nutrition-sync' || !snapshot.data) throw new Error('Snapshot nutricional no válido.');
+  for (const store of NUTRITION_DATA_STORES) if (!Array.isArray(snapshot.data[store])) snapshot.data[store] = [];
+  if (!Array.isArray(snapshot.tombstones)) snapshot.tombstones = [];
+  return snapshot;
+}
+
+async function buildNutritionSnapshot() {
+  const rows = await Promise.all(NUTRITION_DATA_STORES.map(store => nutritionGetAll(store)));
+  const [syncEntries, settings] = await Promise.all([nutritionGetAll('sync'), getAll('settings')]);
+  const data = {};
+  NUTRITION_DATA_STORES.forEach((store, index) => { data[store] = rows[index]; });
+  const homeId = settings.find(item => item.id === 'homeId')?.value || null;
+  return {
+    format: 'hometasks-nutrition-sync',
+    schemaVersion: 1,
+    appVersion: NUTRITION_VERSION,
+    homeId,
+    updatedAt: Date.now(),
+    sourceDeviceId: localStorage.getItem(LS_DEVICE_ID) || 'nutrition-device',
+    data,
+    tombstones: syncEntries.filter(item => item?.kind === 'tombstone'),
+  };
+}
+
+function mergeNutritionEntities(store, localItems = [], remoteItems = []) {
+  const map = new Map();
+  for (const item of [...localItems, ...remoteItems]) {
+    const id = nutritionEntityId(store, item);
+    if (!id) continue;
+    const previous = map.get(id);
+    if (!previous || nutritionItemTimestamp(item) > nutritionItemTimestamp(previous)) map.set(id, item);
+  }
+  return [...map.values()];
+}
+
+function mergeNutritionTombstones(localItems = [], remoteItems = []) {
+  const map = new Map();
+  for (const item of [...localItems, ...remoteItems]) {
+    if (!item?.store || !item?.entityId) continue;
+    const key = `${item.store}:${item.entityId}`;
+    const previous = map.get(key);
+    if (!previous || Number(item.deletedAt || 0) > Number(previous.deletedAt || 0)) map.set(key, item);
+  }
+  return [...map.values()];
+}
+
+function mergeNutritionSnapshots(localSnapshot, remoteSnapshot) {
+  const local = validateNutritionSnapshot(structuredClone(localSnapshot));
+  const remote = validateNutritionSnapshot(structuredClone(remoteSnapshot));
+  const tombstones = mergeNutritionTombstones(local.tombstones, remote.tombstones).map(tomb => {
+    let newest = 0;
+    for (const snapshot of [local, remote]) {
+      const entity = snapshot.data[tomb.store]?.find(item => nutritionEntityId(tomb.store, item) === String(tomb.entityId));
+      if (entity) newest = Math.max(newest, nutritionItemTimestamp(entity));
+    }
+    return { ...tomb, deletedAt: Math.max(Number(tomb.deletedAt || 0), newest + 1) };
+  });
+  const deleted = new Map(tombstones.map(item => [`${item.store}:${item.entityId}`, Number(item.deletedAt || 0)]));
+  const data = {};
+  for (const store of NUTRITION_DATA_STORES) {
+    data[store] = mergeNutritionEntities(store, local.data[store], remote.data[store]).filter(item => {
+      const id = nutritionEntityId(store, item);
+      const deletedAt = deleted.get(`${store}:${id}`) || 0;
+      return !deletedAt || nutritionItemTimestamp(item) > deletedAt;
+    });
+  }
+  const survivingTombstones = tombstones.filter(tomb => {
+    const item = data[tomb.store]?.find(entry => nutritionEntityId(tomb.store, entry) === String(tomb.entityId));
+    return !item || Number(tomb.deletedAt || 0) >= nutritionItemTimestamp(item);
+  });
+  return {
+    format: 'hometasks-nutrition-sync',
+    schemaVersion: 1,
+    appVersion: NUTRITION_VERSION,
+    homeId: remote.homeId || local.homeId || null,
+    updatedAt: Date.now(),
+    sourceDeviceId: localStorage.getItem(LS_DEVICE_ID) || local.sourceDeviceId || remote.sourceDeviceId || 'nutrition-device',
+    data,
+    tombstones: survivingTombstones,
+  };
+}
+
+async function applyNutritionSnapshot(snapshot) {
+  const snap = validateNutritionSnapshot(structuredClone(snapshot));
+  const deleted = new Map(snap.tombstones.map(item => [`${item.store}:${item.entityId}`, Number(item.deletedAt || 0)]));
+  for (const store of NUTRITION_DATA_STORES) {
+    const current = await nutritionGetAll(store);
+    const merged = mergeNutritionEntities(store, current, snap.data[store]).filter(item => {
+      const id = nutritionEntityId(store, item);
+      const deletedAt = deleted.get(`${store}:${id}`) || 0;
+      return !deletedAt || nutritionItemTimestamp(item) > deletedAt;
+    });
+    if (merged.length) await nutritionPutMany(store, merged, { silent: true });
+  }
+  for (const tomb of snap.tombstones) {
+    if (NUTRITION_DATA_STORES.includes(tomb.store)) {
+      const current = await nutritionGetAll(tomb.store);
+      const entity = current.find(item => nutritionEntityId(tomb.store, item) === String(tomb.entityId));
+      if (!entity || nutritionItemTimestamp(entity) <= Number(tomb.deletedAt || 0)) {
+        await nutritionRemove(tomb.store, tomb.entityId, { tombstone: false, silent: true });
+      }
+    }
+  }
+  await nutritionClear('sync', { silent: true });
+  if (snap.tombstones.length) await nutritionPutMany('sync', snap.tombstones, { silent: true });
+}
+
+async function nutritionBackendPost(payload, timeoutMs = 65000) {
+  const { endpoint, houseKey } = chatBackendConfig();
+  if (!endpoint || !houseKey) throw new Error('Configura primero Apps Script en Ajustes.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetch(endpoint, {
+      method: 'POST', mode: 'no-cors', cache: 'no-store', redirect: 'follow', credentials: 'omit',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify({ ...payload, key: houseKey, clientVersion: NUTRITION_VERSION }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function nutritionSyncNow({ silent = true } = {}) {
+  if (!navigator.onLine || !nutritionSyncAvailable()) return false;
+  if (state.nutritionSyncBusy) {
+    state.nutritionSyncQueued = true;
+    return false;
+  }
+  state.nutritionSyncBusy = true;
+  const revisionAtStart = nutritionSyncRevision();
+  const dirtyAtStart = localStorage.getItem(LS_NUTRITION_SYNC_DIRTY) === '1' || !localStorage.getItem(LS_NUTRITION_LAST_SYNC);
+  try {
+    const local = await buildNutritionSnapshot();
+    const pulled = await chatJsonpRequest('nutrition_sync_pull', {}, 32000);
+    if (!pulled?.ok) throw new Error(pulled?.message || pulled?.error || 'No se pudo descargar Comidas.');
+    const remote = pulled.snapshot ? validateNutritionSnapshot(pulled.snapshot) : null;
+    let merged = remote ? mergeNutritionSnapshots(local, remote) : local;
+    await applyNutritionSnapshot(merged);
+
+    const changedDuringPull = nutritionSyncRevision() !== revisionAtStart;
+    if (dirtyAtStart || !remote || changedDuringPull) {
+      const latestLocal = changedDuringPull ? await buildNutritionSnapshot() : local;
+      if (changedDuringPull) merged = remote ? mergeNutritionSnapshots(latestLocal, merged) : mergeNutritionSnapshots(latestLocal, merged);
+      await nutritionBackendPost({ action: 'nutrition_sync_push', snapshot: merged });
+      await new Promise(resolve => setTimeout(resolve, 900));
+      const confirmedPayload = await chatJsonpRequest('nutrition_sync_pull', {}, 32000);
+      if (!confirmedPayload?.ok) throw new Error(confirmedPayload?.message || confirmedPayload?.error || 'Apps Script no confirmó Comidas.');
+      if (confirmedPayload.snapshot) {
+        merged = mergeNutritionSnapshots(merged, validateNutritionSnapshot(confirmedPayload.snapshot));
+        await applyNutritionSnapshot(merged);
+      }
+    }
+
+    const stable = nutritionSyncRevision() === revisionAtStart || (!dirtyAtStart && nutritionSyncRevision() === revisionAtStart);
+    if (stable) localStorage.setItem(LS_NUTRITION_SYNC_DIRTY, '0');
+    else localStorage.setItem(LS_NUTRITION_SYNC_DIRTY, '1');
+    localStorage.setItem(LS_NUTRITION_LAST_SYNC, String(Date.now()));
+    await loadNutritionState({ refreshUsers: false });
+    renderAllNutrition();
+    if (!silent) showToast('Comidas sincronizadas');
+    if (!stable) scheduleNutritionSync(900);
+    return true;
+  } catch (error) {
+    localStorage.setItem(LS_NUTRITION_SYNC_DIRTY, '1');
+    console.warn('No se pudo sincronizar Comidas:', error);
+    if (!silent) showToast('No se pudo sincronizar Comidas');
+    return false;
+  } finally {
+    state.nutritionSyncBusy = false;
+    if (state.nutritionSyncQueued) {
+      state.nutritionSyncQueued = false;
+      scheduleNutritionSync(500);
+    }
+  }
 }
 
 async function ensureMealTypes() {
@@ -869,7 +1101,7 @@ async function refreshChatBackendStatus() {
     state.chatBackendReady = false;
     setChatStatus('error', 'Apps Script sin configurar');
     els.nutritionChatSetup.hidden = false;
-    els.nutritionChatSetupText.textContent = 'Configura la URL /exec y la clave de la casa en Ajustes. V11-C.1 usa ese mismo backend como proxy seguro.';
+    els.nutritionChatSetupText.textContent = 'Configura la URL /exec y la clave de la casa en Ajustes. V11-C.2 usa ese mismo backend como proxy seguro.';
     return false;
   }
   setChatStatus('checking', 'Comprobando Gemini…');
@@ -884,7 +1116,7 @@ async function refreshChatBackendStatus() {
     }
     const message = result.error === 'unauthorized'
       ? 'La clave de la casa no coincide con el Apps Script desplegado.'
-      : 'Añade GEMINI_API_KEY en Propiedades de script del proyecto Apps Script y vuelve a desplegar V11-C.1.';
+      : 'Añade GEMINI_API_KEY en Propiedades de script del proyecto Apps Script y vuelve a desplegar V11-C.2.';
     setChatStatus('error', 'Gemini sin configurar');
     els.nutritionChatSetup.hidden = false;
     els.nutritionChatSetupText.textContent = message;
@@ -966,7 +1198,7 @@ async function clearNutritionChatHistory() {
   const messages = chatMessagesForPerson();
   if (!messages.length || state.chatBusy) return;
   const user = state.users.find(item => item.id === state.selectedPersonId);
-  if (!confirm(`¿Empezar un chat nuevo para ${user?.name || 'esta persona'}? Se eliminará únicamente el historial local del chat.`)) return;
+  if (!confirm(`¿Empezar un chat nuevo para ${user?.name || 'esta persona'}? Se eliminará el historial del chat y el borrado se sincronizará con tus dispositivos.`)) return;
   for (const message of messages) await nutritionRemove('chatMessages', message.id);
   state.chatMessages = state.chatMessages.filter(item => item.personId !== state.selectedPersonId);
   renderChatMessages();
@@ -1054,6 +1286,18 @@ function setupEvents() {
   els.closeCopyWeekDialog.addEventListener('click', () => els.copyWeekDialog.close());
   els.cancelCopyWeekDialog.addEventListener('click', () => els.copyWeekDialog.close());
 
+  window.addEventListener('hometasks:nutrition-changed', () => {
+    markNutritionDirty();
+    scheduleNutritionSync(1400);
+  });
+  window.addEventListener('hometasks:sync-complete', event => {
+    nutritionSyncNow({ silent: event?.detail?.silent !== false }).catch(error => console.warn('Sincronización Comidas:', error));
+  });
+  window.addEventListener('online', () => scheduleNutritionSync(700));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') scheduleNutritionSync(500);
+  });
+
   window.addEventListener('hometasks:core-reset', async () => {
     await resetNutritionDatabase();
     await ensureMealTypes();
@@ -1069,6 +1313,8 @@ async function initNutrition() {
   setupEvents();
   renderAllNutrition();
   document.documentElement.dataset.nutritionVersion = NUTRITION_VERSION;
+  if (!localStorage.getItem(LS_NUTRITION_LAST_SYNC)) localStorage.setItem(LS_NUTRITION_SYNC_DIRTY, '1');
+  if (localStorage.getItem(LS_AUTO_SYNC) === '1') scheduleNutritionSync(2600);
 }
 
 initNutrition().catch(error => {
